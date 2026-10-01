@@ -68,3 +68,24 @@ export async function chat(opts: ChatOptions): Promise<string> {
     clearTimeout(timer);
   }
 }
+
+export type ModelCheck = { ok: true; name: string } | { ok: false; reason: string };
+
+/** Ask OpenRouter whether a model id exists: GET /api/v1/model/{author}/{slug}. */
+export async function checkModel(apiKey: string, modelId: string, fetchImpl: typeof fetch = fetch): Promise<ModelCheck> {
+  const slash = modelId.indexOf('/');
+  if (slash <= 0 || slash === modelId.length - 1) return { ok: false, reason: 'Expected an id like author/model-name' };
+  if (!apiKey) return { ok: false, reason: 'No OpenRouter key set' };
+  try {
+    const res = await fetchImpl(`https://openrouter.ai/api/v1/model/${modelId.slice(0, slash)}/${modelId.slice(slash + 1)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.status === 404) return { ok: false, reason: 'Unknown model id' };
+    if (res.status === 401 || res.status === 403) return { ok: false, reason: 'Key rejected' };
+    if (!res.ok) return { ok: false, reason: `Couldn't check (HTTP ${res.status})` };
+    const data = (await res.json()) as { data?: { name?: string } };
+    return { ok: true, name: data.data?.name ?? modelId };
+  } catch (err) {
+    return { ok: false, reason: `Couldn't check (${(err as Error).message})` };
+  }
+}

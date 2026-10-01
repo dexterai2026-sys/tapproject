@@ -1,6 +1,7 @@
 import { h, mount } from './dom';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from '../settings';
 import { listVoices } from '../ai/lazybird';
+import { checkModel } from '../ai/openrouter';
 import { VoiceListener } from '../voice/listener';
 
 const CURATED_VOICES = 6;
@@ -28,6 +29,12 @@ export function settingsScreen(onBack: () => void): void {
         h('label', {}, 'API key', text('openrouterKey', 'password')),
         h('label', {}, 'Fast model (parsing)', text('fastModel')),
         h('label', {}, 'Premium model (live trash talk)', text('premiumModel')),
+        h('button', { onclick: async () => {
+          const [fast, prem] = await Promise.all([checkModel(s.openrouterKey, s.fastModel), checkModel(s.openrouterKey, s.premiumModel)]);
+          const show = (label: string, r: Awaited<ReturnType<typeof checkModel>>) => `${label}: ${r.ok ? `OK (${r.name})` : r.reason}`;
+          status = `${show('Fast', fast)} · ${show('Premium', prem)}`;
+          render();
+        } }, 'Check models'),
         h('label', {}, 'Commentary', select('commentary', [['off', 'Off'], ['canned', 'Built-in lines only (free)'], ['live', 'Live AI for big moments']])),
         h('label', {}, 'Live lines per game', text('liveCap', 'number')),
       ),
