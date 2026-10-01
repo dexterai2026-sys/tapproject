@@ -1,0 +1,20 @@
+:root { --bg: #fffaf0; --fg: #1d1b16; --accent: #c2410c; --ok: #15803d; --err: #b91c1c; --panel: #fff; --line: #e7dfd0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1b1814; --fg: #f4eee3; --panel: #26221c; --line: #3a342a; --accent: #fb923c; --ok: #4ade80; --err: #f87171; } }
+@media (prefers-contrast: more) { :root { --line: currentColor; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 18px/1.4 system-ui, sans-serif; }
+#app { max-width: 640px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+h1, h2, h3 { margin: 0; }
+button, select, input { font: inherit; padding: 10px 14px; border-radius: 10px; border: 2px solid var(--line); background: var(--panel); color: inherit; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.link { border: 0; background: none; text-decoration: underline; }
+button.tile { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.status { background: var(--panel); border: 2px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.top b { font-size: 2.4rem; margin-left: 10px; }
+.scores { margin: 0; padding-left: 18px; }
+.ok { color: var(--ok); margin: 0; } .err { color: var(--err); margin: 0; font-weight: 600; } .warn { color: var(--accent); font-weight: 600; margin: 0; }
+.log { margin: 0; padding-left: 28px; font-size: .9rem; opacity: .85; }
+.hand { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.hand button { padding: 8px 10px; }
+.sim { border: 2px dashed var(--line); border-radius: 14px; padding: 12px; }
