@@ -1,11 +1,10 @@
 import { AiError } from './openrouter';
 
-// UNVERIFIED against Lazybird's real API (docs were unreachable when this was written).
-// Known: base URL and X-API-Key auth. The paths and field names below are best guesses
-// kept in one place so they are easy to correct against https://api.lazybird.app/v1/docs.
+// Per Lazybird's API reference: X-API-Key auth, GET /voices, POST /generate-speech -> audio/mpeg.
+// Their docs advise calling the API from a server, not browser code (see README).
 export const LAZYBIRD_BASE = 'https://api.lazybird.app/v1';
 export const VOICES_PATH = '/voices';
-export const SPEECH_PATH = '/speech';
+export const SPEECH_PATH = '/generate-speech';
 
 export interface Voice {
   id: string;
@@ -45,8 +44,8 @@ export async function listVoices(o: Opts): Promise<Voice[]> {
   return rows
     .map((r) => r as Record<string, unknown>)
     .map((r) => ({
-      id: String(r.id ?? r.voice_id ?? ''),
-      name: String(r.name ?? r.id ?? r.voice_id ?? ''),
+      id: String(r.id ?? ''),
+      name: String(r.displayName ?? r.name ?? r.id ?? ''),
       language: r.language ? String(r.language) : undefined,
     }))
     .filter((v) => v.id);
@@ -54,7 +53,7 @@ export async function listVoices(o: Opts): Promise<Voice[]> {
 
 /** Returns MP3 audio for plain text, or SSML when `ssml` is true. */
 export async function synthesize(text: string, voiceId: string, o: Opts & { ssml?: boolean }): Promise<Blob> {
-  const body = { [o.ssml ? 'ssml' : 'text']: text, voice_id: voiceId, format: 'mp3' };
+  const body = { voiceId, [o.ssml ? 'ssml' : 'text']: text };
   const res = await call(
     SPEECH_PATH,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },

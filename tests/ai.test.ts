@@ -33,10 +33,10 @@ describe('openrouter chat', () => {
 });
 
 describe('lazybird', () => {
-  it('lists voices with X-API-Key, tolerating both array and {voices} shapes', async () => {
-    const f = vi.fn(async () => json({ voices: [{ voice_id: 'v1', name: 'Ava' }, { id: 'v2' }, { name: 'no id' }] }));
+  it('lists voices (documented array shape) with X-API-Key', async () => {
+    const f = vi.fn(async () => json([{ id: 'msa.en-US.Jenny', displayName: 'Jenny', language: 'English (United States)', gender: 'Female' }, { displayName: 'no id' }]));
     const v = await listVoices({ apiKey: 'lb', fetchImpl: f as unknown as typeof fetch });
-    expect(v).toEqual([{ id: 'v1', name: 'Ava', language: undefined }, { id: 'v2', name: 'v2', language: undefined }]);
+    expect(v).toEqual([{ id: 'msa.en-US.Jenny', name: 'Jenny', language: 'English (United States)' }]);
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
     expect(url.startsWith(LAZYBIRD_BASE)).toBe(true);
     expect((init.headers as Record<string, string>)['X-API-Key']).toBe('lb');
@@ -46,7 +46,8 @@ describe('lazybird', () => {
     const fx = f as unknown as typeof fetch;
     const blob = await synthesize('hi', 'v1', { apiKey: 'lb', fetchImpl: fx });
     expect(blob.size).toBe(3);
-    expect(JSON.parse((f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toMatchObject({ text: 'hi', voice_id: 'v1' });
+    expect((f.mock.calls[0] as unknown as [string])[0]).toBe(`${LAZYBIRD_BASE}/generate-speech`);
+    expect(JSON.parse((f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({ voiceId: 'v1', text: 'hi' });
     await synthesize('<speak>x</speak>', 'v1', { apiKey: 'lb', fetchImpl: fx, ssml: true });
     expect(JSON.parse((f.mock.calls[1] as unknown as [string, RequestInit])[1].body as string).ssml).toBe('<speak>x</speak>');
   });
