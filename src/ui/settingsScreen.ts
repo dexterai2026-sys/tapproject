@@ -23,7 +23,7 @@ export function settingsScreen(onBack: () => void): void {
     const micOk = VoiceListener.isSupported();
     mount(
       h('h1', {}, 'Voice & AI'),
-      h('p', { class: 'warn' }, 'Keys are stored only in this browser and sent only to their own service. Use this for local testing: a shipped app needs server-side keys.'),
+      h('p', { class: 'warn' }, 'Keys are stored only in this browser and sent only to their own service. Use this for local testing: a shipped app needs server-side keys. Give your OpenRouter key a credit limit, and delete it if you think it leaked.'),
       h('fieldset', {}, h('legend', {}, 'OpenRouter (commentary)'),
         h('label', {}, 'API key', text('openrouterKey', 'password')),
         h('label', {}, 'Fast model (parsing)', text('fastModel')),

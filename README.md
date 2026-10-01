@@ -31,6 +31,8 @@ Open **Voice & AI settings** on the home screen and paste your own keys. They ar
 - **Voice in (Chrome):** push-to-talk or wake word (default "hey deck"). Commands: "draw", "last card". A local grammar handles them; the fast model is only a fallback for odd phrasing.
 - **Lazybird API:** `GET /voices` and `POST /generate-speech` (`{voiceId, text|ssml}` → MP3), matching Lazybird's API reference. Their docs say API keys shouldn't be exposed in browser code, which is exactly what this paste-your-own-key mode does; use it for local testing only and move the calls behind a server before shipping. Lazybird's browser CORS support is untested. OpenRouter and the microphone were also untested against the real services; tests use mocked `fetch` and a fake recognizer.
 
+Key hygiene: create the OpenRouter key with a credit limit (OpenRouter recommends this for every key) and delete it if exposed. Never commit keys.
+
 Real-device checklist: paste both keys → Load voices → play a round with Live AI → try push-to-talk "draw" → try "hey deck, last card".
 
 ## Deploy
