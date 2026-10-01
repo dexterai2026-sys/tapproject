@@ -18,3 +18,6 @@ button.tile { display: flex; flex-direction: column; gap: 4px; text-align: left;
 .hand { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .hand button { padding: 8px 10px; }
 .sim { border: 2px dashed var(--line); border-radius: 14px; padding: 12px; }
+.caption { margin: 0; font-style: italic; }
+.mic { padding: 18px; font-weight: 600; touch-action: none; user-select: none; }
+fieldset { border: 2px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; }

@@ -30,3 +30,7 @@ export function feedback(kind: 'success' | 'error'): void {
     /* vibration unsupported */
   }
 }
+
+export function mount(...nodes: (Node | false)[]): void {
+  (document.getElementById('app') as HTMLElement).replaceChildren(...nodes.filter((n): n is Node => !!n));
+}

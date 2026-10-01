@@ -1,21 +1,23 @@
-import { h, cardLabel, feedback, SUIT_ICON } from './dom';
+import { h, cardLabel, feedback, mount, SUIT_ICON } from './dom';
 import { matchingGame } from '../games/matching';
-import { applyAction, handleTap, startGame } from '../engine/engine';
+import { applyAction, startGame } from '../engine/engine';
 import { STANDARD_DECK, mulberry32, registerChip, resolveChip, simulatedChipId, simulatedChipMap, type ChipMap } from '../engine/deck';
 import { currentPlayer } from '../engine/turns';
-import type { Cartridge, GameState, Player } from '../engine/types';
+import type { Action, Cartridge, GameState, Player } from '../engine/types';
 import type { CardInput } from '../input/cardInput';
 import { SimulatedInput } from '../input/simulated';
 import { WebNfcInput } from '../input/webnfc';
 import { loadChipMap, saveChipMap } from '../storage';
+import { loadSettings } from '../settings';
+import { Commentator } from '../ai/commentator';
+import { createLinePicker } from '../ai/lines';
+import { createSpeaker } from '../ai/speech';
+import { resolveCommand } from '../voice/command';
+import { VoiceListener } from '../voice/listener';
+import { settingsScreen } from './settingsScreen';
 
-const root = () => document.getElementById('app') as HTMLElement;
 const GAMES: Cartridge[] = [matchingGame];
 const rng = mulberry32(Date.now());
-
-function mount(...nodes: (Node | false)[]): void {
-  root().replaceChildren(...nodes.filter((n): n is Node => !!n));
-}
 
 export function homeScreen(): void {
   mount(
@@ -24,6 +26,7 @@ export function homeScreen(): void {
       h('button', { class: 'tile', onclick: () => setupScreen(g) }, h('strong', {}, g.name), h('span', {}, g.description)),
     ),
     h('button', { class: 'link', onclick: tagsScreen }, 'Register NFC tags'),
+    h('button', { class: 'link', onclick: () => settingsScreen(homeScreen) }, 'Voice & AI settings'),
   );
 }
 
@@ -59,9 +62,42 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
   const sim = new SimulatedInput();
   const chipMap: ChipMap = realNfc ? loadChipMap() : simulatedChipMap();
   const nfcInput: CardInput | null = realNfc ? new WebNfcInput() : null;
+  const settings = loadSettings();
   let flash = '';
   let flashOk = true;
+  let caption = '';
+  let notice = '';
+  let alive = true;
+  let listener: VoiceListener | null = null;
 
+  const speaker = createSpeaker(settings, (busy) => {
+    if (listener) listener.muted = busy; // don't hear our own voice
+  });
+  const commentator = new Commentator({
+    settings: () => settings,
+    speak: (text, opts) => speaker.speak(text, opts),
+    pick: createLinePicker(),
+    caption: (t) => {
+      caption = t;
+      render();
+    },
+    notice: (m) => {
+      notice = m;
+      render();
+    },
+  });
+
+  // Every input (tap, key, button, voice) funnels through here.
+  const act = (a: Action) => {
+    const prev = state;
+    const r = applyAction(game, state, a, rng);
+    state = r.state;
+    flash = r.message;
+    flashOk = r.ok;
+    feedback(r.ok ? 'success' : 'error');
+    commentator.onResult(prev, a, r); // side-channel: can never affect the game
+    render();
+  };
   const onTap = (chipId: string) => {
     const card = resolveChip(chipMap, chipId);
     if (!card) {
@@ -70,20 +106,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
       feedback('error');
       return render();
     }
-    const r = handleTap(game, state, card.id, rng);
-    state = r.state;
-    flash = r.message;
-    flashOk = r.ok;
-    feedback(r.ok ? 'success' : 'error');
-    render();
-  };
-  const act = (a: Parameters<typeof applyAction>[2]) => {
-    const r = applyAction(game, state, a, rng);
-    state = r.state;
-    flash = r.message;
-    flashOk = r.ok;
-    feedback(r.ok ? 'success' : 'error');
-    render();
+    act(game.tapToAction(state, card));
   };
   sim.subscribe(onTap);
   nfcInput?.subscribe(onTap);
@@ -91,6 +114,31 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
     flash = e.message;
     render();
   });
+
+  const onUtterance = async (text: string) => {
+    const cmd = await resolveCommand(text, { apiKey: settings.openrouterKey, model: settings.fastModel });
+    if (!alive) return;
+    const cur = currentPlayer(state.public.turn);
+    if (cmd.type === 'draw') act({ type: 'draw', player: cur });
+    else if (cmd.type === 'callLast') act({ type: 'callLast', player: state.public.lastCardPending ?? cur });
+    else {
+      flash = `Didn't catch that: "${text}"`;
+      flashOk = false;
+      render();
+    }
+  };
+  if (settings.mic !== 'off' && VoiceListener.isSupported()) {
+    listener = new VoiceListener({
+      mode: settings.mic,
+      wakeWord: settings.wakeWord,
+      onUtterance: (t) => void onUtterance(t),
+      onError: (m) => {
+        notice = m;
+        render();
+      },
+    });
+    if (settings.mic === 'wake') listener.start();
+  }
 
   const keys = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
@@ -100,13 +148,24 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
     if (e.key === 'l' || e.key === 'L') act({ type: 'callLast', player: state.public.lastCardPending ?? cur });
   };
   document.addEventListener('keydown', keys);
-  const leave = () => {
+  const cleanup = () => {
+    alive = false;
     document.removeEventListener('keydown', keys);
     nfcInput?.stop();
+    listener?.stop();
+    speaker.stop();
+  };
+  const leave = () => {
+    cleanup();
     homeScreen();
+  };
+  const again = () => {
+    cleanup();
+    gameScreen(game, players, realNfc);
   };
 
   function render(): void {
+    if (!alive) return;
     const pub = state.public;
     const cur = currentPlayer(pub.turn);
     const top = pub.discard[pub.discard.length - 1]!;
@@ -122,7 +181,17 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
         h('ul', { class: 'scores' }, players.map((p) => h('li', {}, `${p.name}: ${pub.handCounts[p.id]} cards · ${pub.scores[p.id]} pts`))),
         h('small', {}, `Draw pile: ${pub.drawPileCount}`),
+        caption && h('p', { class: 'caption', 'aria-live': 'polite' }, `🎙 ${caption}`),
+        notice && h('small', { class: 'warn' }, notice),
       ),
+      settings.mic === 'push' && !!listener &&
+        h('button', {
+          class: 'mic',
+          onpointerdown: () => listener?.start(),
+          onpointerup: () => listener?.stop(),
+          onpointerleave: () => listener?.stop(),
+        }, 'Hold to talk'),
+      settings.mic === 'wake' && !!listener && h('small', {}, `Listening for "${settings.wakeWord}" — try "${settings.wakeWord}, draw".`),
       h('ul', { class: 'log' }, [...pub.log].reverse().slice(0, 12).map((l) => h('li', {}, l))),
       pub.status === 'playing' &&
         h('section', { class: 'sim' },
@@ -134,7 +203,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
             h('div', { class: 'hand' }, STANDARD_DECK.map((c) => h('button', { onclick: () => sim.tap(simulatedChipId(c.id)) }, cardLabel(c)))),
           ),
         ),
-      h('button', { class: 'primary', onclick: pub.status === 'finished' ? () => gameScreen(game, players, realNfc) : leave }, pub.status === 'finished' ? 'Play again' : 'Quit'),
+      h('button', { class: 'primary', onclick: pub.status === 'finished' ? again : leave }, pub.status === 'finished' ? 'Play again' : 'Quit'),
       pub.status === 'finished' && h('button', { class: 'link', onclick: leave }, 'Home'),
     );
   }
