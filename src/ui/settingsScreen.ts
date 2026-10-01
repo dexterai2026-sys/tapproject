@@ -3,10 +3,15 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from '../
 import { listVoices } from '../ai/lazybird';
 import { checkModel } from '../ai/openrouter';
 import { VoiceListener } from '../voice/listener';
+import { applyDisplay } from './display';
+import { setActive, setNavVisible } from './nav';
+import { setOnboarded } from '../save';
 
 const CURATED_VOICES = 6;
 
 export function settingsScreen(onBack: () => void): void {
+  setActive('settings');
+  setNavVisible(true);
   const s: Settings = loadSettings();
   let status = '';
   let voices: { id: string; name: string }[] = s.voiceId ? [{ id: s.voiceId, name: s.voiceId }] : [];
@@ -25,6 +30,16 @@ export function settingsScreen(onBack: () => void): void {
     mount(
       h('h1', {}, 'Voice & AI'),
       h('p', { class: 'warn' }, 'Keys are stored only in this browser and sent only to their own service. Use this for local testing: a shipped app needs server-side keys. Give your OpenRouter key a credit limit, and delete it if you think it leaked.'),
+      h('fieldset', {}, h('legend', {}, 'Display & sound'),
+        h('label', {}, 'Text size', (() => {
+          const el = select('textSize', [['S', 'Small'], ['M', 'Medium'], ['L', 'Large'], ['XL', 'Extra large']]);
+          el.addEventListener('change', () => applyDisplay(s));
+          return el;
+        })()),
+        h('label', {}, h('input', { type: 'checkbox', checked: s.highContrast, onchange: (e: Event) => { s.highContrast = (e.target as HTMLInputElement).checked; applyDisplay(s); } }), ' High contrast'),
+        h('label', {}, h('input', { type: 'checkbox', checked: s.sound, onchange: (e: Event) => (s.sound = (e.target as HTMLInputElement).checked) }), ' Sound effects (vibration stays on where supported)'),
+        h('button', { onclick: () => { setOnboarded(false); status = 'The tutorial will show at the start of your next Match Up game.'; render(); } }, 'Replay tutorial'),
+      ),
       h('fieldset', {}, h('legend', {}, 'OpenRouter (commentary)'),
         h('label', {}, 'API key', text('openrouterKey', 'password')),
         h('label', {}, 'Fast model (parsing)', text('fastModel')),
@@ -58,8 +73,8 @@ export function settingsScreen(onBack: () => void): void {
       ),
       h('p', { role: 'status' }, status || ' '),
       h('button', { class: 'primary', onclick: () => { s.liveCap = Math.max(0, Number(s.liveCap) || 0); saveSettings(s); onBack(); } }, 'Save'),
-      h('button', { onclick: () => { Object.assign(s, DEFAULT_SETTINGS); status = 'Reset (not saved yet).'; render(); } }, 'Reset to defaults'),
-      h('button', { class: 'link', onclick: onBack }, 'Cancel'),
+      h('button', { onclick: () => { Object.assign(s, DEFAULT_SETTINGS); applyDisplay(s); status = 'Reset (not saved yet).'; render(); } }, 'Reset to defaults'),
+      h('button', { class: 'link', onclick: () => { applyDisplay(loadSettings()); onBack(); } }, 'Cancel'),
     );
   }
   render();

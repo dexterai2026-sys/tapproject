@@ -1,6 +1,8 @@
 export type CommentaryMode = 'off' | 'canned' | 'live';
 export type MicMode = 'off' | 'push' | 'wake';
 
+export type TextSize = 'S' | 'M' | 'L' | 'XL';
+
 export interface Settings {
   openrouterKey: string;
   lazybirdKey: string;
@@ -12,6 +14,9 @@ export interface Settings {
   liveCap: number; // max live AI lines per game session
   mic: MicMode;
   wakeWord: string;
+  textSize: TextSize;
+  highContrast: boolean;
+  sound: boolean; // audio cues (vibration is separate and always on where supported)
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +30,9 @@ export const DEFAULT_SETTINGS: Settings = {
   liveCap: 20,
   mic: 'off',
   wakeWord: 'hey deck',
+  textSize: 'M',
+  highContrast: false,
+  sound: true,
 };
 
 const KEY = 'tap.settings.v1';

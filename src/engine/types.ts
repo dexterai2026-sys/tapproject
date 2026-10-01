@@ -81,6 +81,9 @@ export interface Cartridge {
   id: string;
   name: string;
   description: string;
+  /** Per-game look and feel inside one visual language. */
+  accent: string;
+  feedbackStyle: 'playful' | 'dramatic';
   players: PlayerCount;
   setup(players: Player[], rng: Rng): GameState;
   reduce(state: GameState, action: Action, rng: Rng): ActionResult;

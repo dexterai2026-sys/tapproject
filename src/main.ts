@@ -1,4 +1,9 @@
 import './style.css';
-import { homeScreen } from './ui/screens';
+import { loadSettings } from './settings';
+import { applyDisplay } from './ui/display';
+import { initShell } from './ui/nav';
+import { showTab } from './ui/screens';
 
-homeScreen();
+applyDisplay(loadSettings());
+initShell(showTab);
+showTab('games');

@@ -1,4 +1,4 @@
-import { h, cardLabel, feedback, mount, SUIT_ICON } from './dom';
+import { h, cardLabel, mount, SUIT_ICON } from './dom';
 import { matchingGame } from '../games/matching';
 import { applyAction, startGame } from '../engine/engine';
 import { STANDARD_DECK, mulberry32, registerChip, resolveChip, simulatedChipId, simulatedChipMap, type ChipMap } from '../engine/deck';
@@ -15,56 +15,134 @@ import { createSpeaker } from '../ai/speech';
 import { resolveCommand } from '../voice/command';
 import { VoiceListener } from '../voice/listener';
 import { settingsScreen } from './settingsScreen';
+import { createFeedback } from './feedback';
+import { Onboarding } from './onboarding';
+import { applyAccent } from './display';
+import { setActive, setNavVisible, type Tab } from './nav';
+import {
+  cleanNames, clearGame, isOnboarded, loadGame, loadNames, loadTally, recordWin, resetTally, saveGame, saveNames, saveTally,
+  setOnboarded,
+} from '../save';
 
 const GAMES: Cartridge[] = [matchingGame];
 const rng = mulberry32(Date.now());
 
+export function showTab(tab: Tab): void {
+  if (tab === 'saved') return savedScreen();
+  if (tab === 'tags') return tagsScreen();
+  if (tab === 'settings') return settingsScreen(homeScreen);
+  homeScreen();
+}
+
+function chrome(tab: Tab | null): void {
+  setActive(tab);
+  setNavVisible(true);
+  applyAccent(null);
+}
+
+function tallyList(): HTMLElement | false {
+  const t = loadTally();
+  if (!t.games) return false;
+  const rows = Object.entries(t.wins).sort((a, b) => b[1] - a[1]);
+  return h('section', { class: 'night' },
+    h('h2', {}, 'Game night'),
+    h('ul', {}, rows.map(([name, wins]) => h('li', {}, `${name}: ${wins} win${wins === 1 ? '' : 's'}`))),
+    h('small', {}, `${t.games} game${t.games === 1 ? '' : 's'} played`),
+    h('button', { class: 'link', onclick: () => { resetTally(); homeScreen(); } }, 'New game night'),
+  );
+}
+
 export function homeScreen(): void {
+  chrome('games');
+  const saved = loadGame();
   mount(
     h('h1', {}, 'Choose a game'),
+    !!saved && h('button', { class: 'tile resume', onclick: () => resumeSaved() },
+      h('strong', {}, 'Resume game'), h('span', {}, describeSave(saved.cartridgeId, saved.players.length))),
     ...GAMES.map((g) =>
-      h('button', { class: 'tile', onclick: () => setupScreen(g) }, h('strong', {}, g.name), h('span', {}, g.description)),
+      h('button', { class: 'tile', style: `--tile-accent:${g.accent}`, onclick: () => setupScreen(g) }, h('strong', {}, g.name), h('span', {}, g.description)),
     ),
-    h('button', { class: 'link', onclick: tagsScreen }, 'Register NFC tags'),
-    h('button', { class: 'link', onclick: () => settingsScreen(homeScreen) }, 'Voice & AI settings'),
+    tallyList(),
+  );
+}
+
+function describeSave(cartridgeId: string, players: number): string {
+  const g = GAMES.find((x) => x.id === cartridgeId);
+  return `${g?.name ?? cartridgeId}, ${players} players`;
+}
+
+function resumeSaved(): void {
+  const saved = loadGame();
+  const game = saved && GAMES.find((g) => g.id === saved.cartridgeId);
+  if (!saved || !game) return savedScreen();
+  gameScreen(game, saved.players, saved.realNfc, saved.state);
+}
+
+function savedScreen(): void {
+  chrome('saved');
+  const saved = loadGame();
+  mount(
+    h('h1', {}, 'Saved game'),
+    saved
+      ? h('section', { class: 'status' },
+          h('strong', {}, describeSave(saved.cartridgeId, saved.players.length)),
+          h('small', {}, `Paused ${new Date(saved.savedAt).toLocaleString()}. Leave the physical cards where they are.`),
+          h('button', { class: 'primary', onclick: resumeSaved }, 'Resume'),
+          h('button', { onclick: () => { clearGame(); savedScreen(); } }, 'Discard'),
+        )
+      : h('p', {}, 'No paused game. Pausing a game saves it here.'),
   );
 }
 
 function setupScreen(game: Cartridge): void {
+  chrome('games');
+  applyAccent(game.accent);
   const p = game.players;
   const [min, max] = p.kind === 'fixed' ? [p.count, p.count] : [p.min, p.max];
-  const count = h('select', { id: 'count' }, ...Array.from({ length: max - min + 1 }, (_, i) => h('option', { value: min + i }, String(min + i))));
-  (count as HTMLSelectElement).value = String(Math.min(4, max));
+  let n = Math.min(4, max);
+  let useNfc = false;
+  const names = loadNames();
   const nfcOk = WebNfcInput.isSupported();
-  const nfc = h('input', { type: 'checkbox', id: 'nfc', disabled: !nfcOk });
-  mount(
-    h('h1', {}, game.name),
-    h('label', {}, 'Players ', count),
-    h('label', {}, nfc, ' Use real NFC taps ', h('small', {}, nfcOk ? '(uses registered tags)' : '(needs Chrome on Android; using simulated taps)')),
-    h(
-      'button',
-      {
-        class: 'primary',
-        onclick: () => {
-          const n = Number((count as HTMLSelectElement).value);
-          const players: Player[] = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `Player ${i + 1}` }));
-          gameScreen(game, players, (nfc as HTMLInputElement).checked);
-        },
-      },
-      'Start',
-    ),
-    h('button', { class: 'link', onclick: homeScreen }, 'Back'),
-  );
+
+  function render(): void {
+    const count = h('select', { id: 'count', onchange: (e: Event) => { n = Number((e.target as HTMLSelectElement).value); render(); } },
+      ...Array.from({ length: max - min + 1 }, (_, i) => h('option', { value: min + i }, String(min + i)))) as HTMLSelectElement;
+    count.value = String(n);
+    mount(
+      h('h1', {}, game.name),
+      h('label', {}, 'Players ', count),
+      h('div', { class: 'names' }, Array.from({ length: n }, (_, i) =>
+        h('input', { id: `name-${i}`, placeholder: `Player ${i + 1}`, maxlength: 16, value: names[i] ?? '', 'aria-label': `Player ${i + 1} name`,
+          oninput: (e: Event) => { names[i] = (e.target as HTMLInputElement).value; } }))),
+      h('label', {}, h('input', { type: 'checkbox', id: 'nfc', checked: useNfc, disabled: !nfcOk, onchange: (e: Event) => { useNfc = (e.target as HTMLInputElement).checked; } }),
+        ' Use real NFC taps ', h('small', {}, nfcOk ? '(uses registered tags)' : '(needs Chrome on Android; using simulated taps)')),
+      h('button', { class: 'primary', onclick: () => {
+        const clean = cleanNames(Array.from({ length: n }, (_, i) => names[i] ?? ''));
+        saveNames([...clean.map((c, i) => (names[i]?.trim() ? c : '')), ...names.slice(n)]);
+        gameScreen(game, clean.map((name, i) => ({ id: `p${i}`, name })), useNfc);
+      } }, 'Start'),
+      h('button', { class: 'link', onclick: homeScreen }, 'Back'),
+    );
+  }
+  render();
 }
 
-function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void {
-  let state: GameState = startGame(game, players, rng);
+function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume?: GameState): void {
+  setActive(null);
+  setNavVisible(false);
+  applyAccent(game.accent);
+  let state: GameState = resume ?? startGame(game, players, rng);
   const sim = new SimulatedInput();
   const chipMap: ChipMap = realNfc ? loadChipMap() : simulatedChipMap();
   const nfcInput: CardInput | null = realNfc ? new WebNfcInput() : null;
   const settings = loadSettings();
-  let flash = '';
+  let flash = resume ? 'Game resumed.' : '';
   let flashOk = true;
+  const fx = createFeedback({ sound: settings.sound, style: game.feedbackStyle });
+  const nameOf = (id: string) => players.find((p) => p.id === id)?.name ?? id;
+  const micAvailable = settings.mic !== 'off' && VoiceListener.isSupported();
+  const onboarding = new Onboarding(micAvailable, !resume && game.id === 'matching' && !isOnboarded(), () => setOnboarded(true));
+  const persist = () => saveGame({ cartridgeId: game.id, players, realNfc, state });
   let caption = '';
   let notice = '';
   let alive = true;
@@ -88,14 +166,27 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
   });
 
   // Every input (tap, key, button, voice) funnels through here.
-  const act = (a: Action) => {
+  const act = (a: Action, via: { tap?: boolean; voice?: boolean } = {}) => {
     const prev = state;
     const r = applyAction(game, state, a, rng);
     state = r.state;
     flash = r.message;
     flashOk = r.ok;
-    feedback(r.ok ? 'success' : 'error');
+    fx(r.ok ? 'success' : 'error');
+    if (r.ok) {
+      if (state.public.status === 'finished') {
+        setTimeout(() => fx('win'), 200);
+        saveTally(recordWin(loadTally(), nameOf(state.public.winner as string)));
+        clearGame();
+      } else {
+        if (currentPlayer(state.public.turn) !== currentPlayer(prev.public.turn)) setTimeout(() => fx('turn'), 200);
+        persist();
+      }
+    }
+    if (via.tap) onboarding.onTap(r.ok);
+    if (via.voice && r.ok) onboarding.onVoiceCommand();
     commentator.onResult(prev, a, r); // side-channel: can never affect the game
+    if (via.voice) speaker.speak(r.message); // confirm aloud anything a voice command changed
     render();
   };
   const onTap = (chipId: string) => {
@@ -103,10 +194,10 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
     if (!card) {
       flash = `Unknown tag ${chipId} (register it first)`;
       flashOk = false;
-      feedback('error');
+      fx('error');
       return render();
     }
-    act(game.tapToAction(state, card));
+    act(game.tapToAction(state, card), { tap: true });
   };
   sim.subscribe(onTap);
   nfcInput?.subscribe(onTap);
@@ -119,8 +210,8 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
     const cmd = await resolveCommand(text, { apiKey: settings.openrouterKey, model: settings.fastModel });
     if (!alive) return;
     const cur = currentPlayer(state.public.turn);
-    if (cmd.type === 'draw') act({ type: 'draw', player: cur });
-    else if (cmd.type === 'callLast') act({ type: 'callLast', player: state.public.lastCardPending ?? cur });
+    if (cmd.type === 'draw') act({ type: 'draw', player: cur }, { voice: true });
+    else if (cmd.type === 'callLast') act({ type: 'callLast', player: state.public.lastCardPending ?? cur }, { voice: true });
     else {
       flash = `Didn't catch that: "${text}"`;
       flashOk = false;
@@ -163,15 +254,18 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
     cleanup();
     gameScreen(game, players, realNfc);
   };
+  if (!resume) persist(); // a game paused before the first move still resumes
 
   function render(): void {
     if (!alive) return;
     const pub = state.public;
     const cur = currentPlayer(pub.turn);
     const top = pub.discard[pub.discard.length - 1]!;
-    const nameOf = (id: string) => players.find((p) => p.id === id)!.name;
     const hand = state.private[cur]!.hand;
     mount(
+      onboarding.active && h('div', { class: 'coach', role: 'status' },
+        h('p', {}, onboarding.message(settings.wakeWord, settings.mic)),
+        h('button', { class: 'link', onclick: () => { onboarding.skip(); render(); } }, 'Skip tutorial')),
       h('div', { class: 'status' },
         h('div', { class: 'top' }, h('small', {}, 'Top card'), h('b', { 'aria-label': `${top.suit} ${top.number}` }, cardLabel(top))),
         pub.status === 'finished'
@@ -181,6 +275,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
         h('ul', { class: 'scores' }, players.map((p) => h('li', {}, `${p.name}: ${pub.handCounts[p.id]} cards · ${pub.scores[p.id]} pts`))),
         h('small', {}, `Draw pile: ${pub.drawPileCount}`),
+        pub.status === 'finished' && tallyList(),
         caption && h('p', { class: 'caption', 'aria-live': 'polite' }, `🎙 ${caption}`),
         notice && h('small', { class: 'warn' }, notice),
       ),
@@ -203,7 +298,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
             h('div', { class: 'hand' }, STANDARD_DECK.map((c) => h('button', { onclick: () => sim.tap(simulatedChipId(c.id)) }, cardLabel(c)))),
           ),
         ),
-      h('button', { class: 'primary', onclick: pub.status === 'finished' ? again : leave }, pub.status === 'finished' ? 'Play again' : 'Quit'),
+      h('button', { class: 'primary', onclick: pub.status === 'finished' ? again : leave }, pub.status === 'finished' ? 'Play again' : 'Pause & exit'),
       pub.status === 'finished' && h('button', { class: 'link', onclick: leave }, 'Home'),
     );
   }
@@ -211,6 +306,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean): void 
 }
 
 function tagsScreen(): void {
+  chrome('tags');
   let map = loadChipMap();
   let status = '';
   let input: WebNfcInput | null = null;

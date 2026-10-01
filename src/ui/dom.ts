@@ -23,14 +23,6 @@ export function cardLabel(c: { number: number; suit: string }): string {
   return `${special ?? c.number} ${SUIT_ICON[c.suit]}`;
 }
 
-export function feedback(kind: 'success' | 'error'): void {
-  try {
-    navigator.vibrate?.(kind === 'success' ? 30 : [60, 40, 60]);
-  } catch {
-    /* vibration unsupported */
-  }
-}
-
 export function mount(...nodes: (Node | false)[]): void {
-  (document.getElementById('app') as HTMLElement).replaceChildren(...nodes.filter((n): n is Node => !!n));
+  ((document.getElementById('screen') ?? document.getElementById('app')) as HTMLElement).replaceChildren(...nodes.filter((n): n is Node => !!n));
 }

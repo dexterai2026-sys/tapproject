@@ -191,6 +191,8 @@ export const matchingGame: Cartridge = {
   id: 'matching',
   name: MATCHING_NAME,
   description: 'Match the top card by number or shape. First to empty their hand wins.',
+  accent: '#d9480f', // bright and energetic
+  feedbackStyle: 'playful',
   players: { kind: 'range', min: 2, max: 10 },
   setup,
   reduce,

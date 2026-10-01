@@ -24,6 +24,17 @@ Hands are dealt virtually, so the debug panel shows the current player's hand; c
 2. In setup, tick **Use real NFC taps**.
 The tag stores only its factory ID; card meaning lives in the app. Web NFC is untested against real hardware here (no device in CI), only against a mocked reader.
 
+## Design-brief UX (audit pass)
+- **Player names:** name each seat on the setup screen (remembered; blanks become "Player N", duplicates get a number).
+- **Pause & resume:** every move is saved; *Pause & exit* keeps the game and *Resume game* (home or Saved tab) restores it exactly. Finished games are not kept.
+- **Game night:** wins are tallied per player name across games until *New game night*.
+- **Sound & haptics:** three cue families (tap registered, error, game moments such as your turn and a win), styled per game (Match Up is playful). Sound can be turned off in Settings.
+- **Accessibility:** shape-distinct suits, text size S/M/L/XL, and a high-contrast mode, all in Settings and applied live.
+- **Onboarding:** the first Match Up game coaches the first tap, then hints at the voice layer; replay it from Settings.
+- **Navigation:** bottom bar (Games / Saved / Tags / Settings), hidden during a game. Each game sets its own accent color.
+- Voice-triggered actions are always confirmed aloud, even with commentary off.
+- Not verifiable in CI: how the sounds feel on a phone. Check by ear on your device.
+
 ## Voice & AI (step 5)
 Open **Voice & AI settings** on the home screen and paste your own keys. They are stored only in your browser's `localStorage` and sent only to their own service, so this mode is for local testing: a shipped app needs server-side keys (the brief's design).
 - **Commentary:** *Built-in lines* (free, 20+ variations for frequent moments) or *Live AI* (OpenRouter premium model for plays, +2 and wins, capped per game). Any AI failure silently falls back to built-in lines; scoring never depends on it.
