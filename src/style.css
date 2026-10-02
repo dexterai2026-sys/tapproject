@@ -95,3 +95,5 @@ label:has(> input[type='checkbox']) input { flex: none; margin-top: .25rem; }
 .timing textarea { width: 100%; font: .75rem monospace; background: var(--panel); color: inherit; border: 2px solid var(--line); border-radius: 8px; }
 .timing-table td, .timing-table th { white-space: nowrap; }
 .timing-table td:first-child { white-space: normal; }
+.timing-line { border-top: 1px solid var(--line); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.timing-output { display: block; }

@@ -8,12 +8,15 @@ export interface SpeakerDeps {
   playBlob?: (blob: Blob, signal: AbortSignal, onStart?: () => void) => Promise<void>;
   fallback?: (text: string, signal: AbortSignal, onStart?: () => void) => Promise<void>;
   onBusyChange?: (busy: boolean) => void;
+  /** Called the moment a line becomes audible, so callers can sample output latency. */
+  onAudible?: (line?: TraceRef) => void;
 }
 
 export interface SpeakOptions {
   ssml?: boolean;
   plain?: string; // text for the browser-voice fallback when `text` is SSML
-  trace?: TraceRef; // where to record timings for this line
+  trace?: TraceRef; // the interaction's trace; each spoken line records into its own sub-trace
+  kind?: string; // what the line is: 'reaction' | 'confirmation' | 'answer'
 }
 
 const MAX_QUEUE = 3;
@@ -21,7 +24,7 @@ const MAX_QUEUE = 3;
 /** Speaks lines one at a time; never throws, never blocks the game. */
 export class Speaker {
   enabled = true;
-  private queue: { text: string; opts: SpeakOptions }[] = [];
+  private queue: { text: string; opts: SpeakOptions; line?: TraceRef }[] = [];
   private running = false;
   private ctl = new AbortController();
 
@@ -29,9 +32,10 @@ export class Speaker {
 
   speak(text: string, opts: SpeakOptions = {}): void {
     if (!this.enabled || !text) return;
-    opts.trace?.mark('queued');
-    opts.trace?.meta('textChars', text.length);
-    this.queue.push({ text, opts });
+    const line = opts.trace?.line(opts.kind ?? 'line'); // this line's own timings (an interaction can speak several)
+    line?.mark('queued');
+    line?.meta('textChars', text.length);
+    this.queue.push({ text, opts, line });
     while (this.queue.length > MAX_QUEUE) this.queue.shift(); // stale commentary is worthless
     void this.run();
   }
@@ -50,7 +54,11 @@ export class Speaker {
       while (this.queue.length) {
         const item = this.queue.shift()!;
         const signal = this.ctl.signal;
-        const tr = item.opts.trace;
+        const tr = item.line;
+        const audible = () => {
+          tr?.markOnce('playStart');
+          this.deps.onAudible?.(tr);
+        };
         try {
           if (!this.deps.synth || !this.deps.playBlob) throw new Error('no cloud voice');
           tr?.mark('synthStart');
@@ -62,14 +70,14 @@ export class Speaker {
           tr?.markOnce('synthDone'); // synth deps that don't report timing still end here
           if (signal.aborted) continue;
           tr?.meta('voicePath', 'lazybird');
-          await this.deps.playBlob(blob, signal, () => tr?.markOnce('playStart'));
+          await this.deps.playBlob(blob, signal, audible);
           tr?.markOnce('playEnd');
         } catch {
           if (!signal.aborted) {
             try {
               tr?.meta('voicePath', this.deps.synth ? 'browser-after-lazybird-failed' : 'browser');
               tr?.mark('fallbackStart');
-              await this.deps.fallback?.(item.opts.plain ?? item.text, signal, () => tr?.markOnce('playStart'));
+              await this.deps.fallback?.(item.opts.plain ?? item.text, signal, audible);
               tr?.markOnce('playEnd');
             } catch {
               /* silent: captions still show the line */
@@ -117,13 +125,14 @@ export function browserSpeak(text: string, signal: AbortSignal, onStart?: () => 
 }
 
 /** Wire a Speaker to the user's settings: Lazybird when keyed, browser voice otherwise. */
-export function createSpeaker(s: Settings, onBusyChange?: (busy: boolean) => void): Speaker {
+export function createSpeaker(s: Settings, onBusyChange?: (busy: boolean) => void, onAudible?: (line?: TraceRef) => void): Speaker {
   const cloud = s.lazybirdKey && s.voiceId;
   const speaker = new Speaker({
     synth: cloud ? (text, ssml, onTiming) => synthesize(text, s.voiceId, { apiKey: s.lazybirdKey, ssml, onTiming }) : undefined,
     playBlob: playBlobInBrowser,
     fallback: browserSpeak,
     onBusyChange,
+    onAudible,
   });
   speaker.enabled = s.speak;
   return speaker;

@@ -7,7 +7,7 @@ import type { TraceRef } from '../perf';
 
 export interface CommentatorDeps {
   settings: () => Settings;
-  speak: (text: string, opts?: { ssml?: boolean; plain?: string; trace?: TraceRef }) => void;
+  speak: (text: string, opts?: { ssml?: boolean; plain?: string; trace?: TraceRef; kind?: string }) => void;
   pick: (moment: Moment, vars: Record<string, string>) => string;
   caption: (text: string) => void;
   notice?: (msg: string) => void;
@@ -64,8 +64,8 @@ export class Commentator {
       this.deps.caption(text);
       trace?.markOnce('captionShown');
       if (DRAMATIC.includes(moment)) {
-        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/>${esc(turnLine)}</speak>`, { ssml: true, plain: text, trace });
-      } else this.deps.speak(text, { trace });
+        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/>${esc(turnLine)}</speak>`, { ssml: true, plain: text, trace, kind: 'reaction' });
+      } else this.deps.speak(text, { trace, kind: 'reaction' });
     };
 
     if (s.commentary === 'live' && s.openrouterKey && LIVE_MOMENTS.includes(moment) && this.liveUsed < s.liveCap) {

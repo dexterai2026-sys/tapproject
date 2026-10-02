@@ -12,7 +12,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | Web NFC tap input + tag registration (step 4) | Built; tested with a mocked reader only, **not on real tags** |
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
-| Voice latency tracing (Timing panel) | Built; verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
+| Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
 | Brief UX decisions (names, pause/resume, sound/haptics, accessibility, nav, onboarding, accents, game-night tally) | Done |
 | Spades + other launch games, The Last Witness | Not started |
 | Multi-device sync, game creation by voice, shared game library, accounts | Not started (later phases) |
@@ -97,16 +97,20 @@ Every game screen has a **Timing** panel (hide it in Settings → *Show voice ti
 | Recognizer finalize | You stop talking → Chrome returns the final transcript (it sends audio to Google's service and waits for a pause) |
 | Parse command | Wake-word strip + grammar (the OpenRouter fallback time is recorded separately as `llmParseMs`) |
 | Game action / Commentary text | Applying the move; picking the line (instant for built-in lines, an OpenRouter call for Live AI) |
-| Speech queue wait | How long the line waited behind earlier lines |
+| Speech queue wait | How long a line waited behind earlier lines. **Per line:** a voice command can speak two (a reaction, then a spoken confirmation); each is timed on its own and line 2 shows with a *(line 2)* suffix |
 | Lazybird first byte / download | Request sent → response starts → audio fully downloaded |
 | Playback start | Audio decoded → actually audible |
 | Browser voice start | Same idea when the browser's built-in voice is used (no Lazybird key or Lazybird failed) |
 
-Two headline numbers: **end of speech → first sound** and **end of speech → screen update**, with median and p90 over the session. The slowest stage is highlighted.
+Headline numbers: **end of speech → first sound**, **→ at the ear**, **→ screen update** and **→ all spoken lines done**, with median and p90 over the session. The slowest stage is highlighted. Each spoken line also shows when it became audible, how long it lasted, and the gap after the previous line.
+
+**Output latency (speaker delay).** "First sound" is when the browser reports audio *playing*, which is before the sound leaves the device (Bluetooth adds a lot). Where Chrome reports the audio output latency (`outputLatency`, or derived from the output clock), the panel shows it and adds it to give an **"at the ear" estimate**. If the browser doesn't report it, the panel says so and shows no estimate: it is never guessed. The export records which source was used (`outputLatency`, `timestamp`, or `none`).
+
+**Still not measured:** the true moment you stopped talking (the start point is Chrome's own "speech ended" signal, which fires after it hears silence, so real lag is probably longer), the wake word on its own (wake-word mode times the whole utterance), and the short feedback chimes.
 
 **To share results:** play a round (try push-to-talk and wake word, with and without Live AI), tap **Copy results**, and paste the JSON into the chat. It contains timings, the voice path used (`lazybird`, `browser`, or `browser-after-lazybird-failed`) and your mic/commentary settings. It never contains your keys or what you said (only the command type).
 
-Likely fixes, picked once the numbers show the biggest stage: act on interim results, play an instant "heard you" chime, cache the synthesized built-in lines, shorten clips, and limit Live AI.
+Likely fixes, picked once the numbers show the biggest stage: act on interim results, play an instant "heard you" chime, cache the synthesized built-in lines, shorten clips, limit Live AI, and **fetch line 2's audio while line 1 is still playing** (today line 2 starts its Lazybird request only after line 1 finishes playing, so its queue wait is roughly line 1's whole duration).
 
 ## Deploy
 `.github/workflows/pages.yml` publishes `dist/` to GitHub Pages on push to `main` (enable Pages → "GitHub Actions" in repo settings).
@@ -114,6 +118,9 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-02 (latency: lines + output latency)
+- **Timing panel:** every spoken line is now traced separately (reaction, confirmation, answer), with when it became audible, how long it lasted, and the gap after the previous line. Added output-device latency (read from Chrome's audio clock when available, never guessed) and an "at the ear" estimate. "All lines done" is only shown once every line has finished. First finding from the mocked run: line 2's Lazybird request starts only after line 1 finishes playing, which makes its queue wait the slowest stage. 145 unit tests; browser-verified with a fake audio device reporting 120ms and one reporting none.
 
 ### 2026-10-02 (latency tracing)
 - **Voice latency:** added a Timing panel and a tracer that times every stage from wake to first sound (mic warm-up, recognizer finalize, parse, action, commentary, queue wait, Lazybird first byte + download, playback start), with median/p90 and a *Copy results* export that omits keys and transcripts. Per-label trace caps so taps never evict voice traces. 132 unit tests; browser-verified against injected delays. No behavior change.

@@ -1,5 +1,5 @@
 import { h } from './dom';
-import { STAGE_LABELS, exportResults, headlineOf, slowest, stagesOf, summarize, type ExportContext, type Tracer } from '../perf';
+import { exportResults, headlineOf, lineInfoOf, slowest, stagesOf, summarize, type ExportContext, type Tracer } from '../perf';
 
 let panelOpen = true; // remembered across re-renders of the game screen
 
@@ -27,28 +27,55 @@ export function createTimingPanel(tracer: Tracer, context: () => ExportContext):
       parts.push(h('p', { class: 'timing-empty' }, 'No measurements yet. Say a command or tap a card.'));
     } else {
       const head = headlineOf(last);
-      const stages = stagesOf(last);
-      const slow = slowest(stages);
-      const max = Math.max(1, ...stages.map((s) => s.ms));
-      parts.push(
-        h('p', { class: 'timing-head' },
-          h('b', {}, 'Last: '),
-          `end of speech → first sound ${ms(head.toFirstSoundMs)} · → screen ${ms(head.toScreenMs)}`,
-          head.playbackMs !== undefined && ` · line lasted ${ms(head.playbackMs)}`,
-        ),
+      const lines = lineInfoOf(last);
+      const parentStages = stagesOf(last).filter((s) => !lines.some((l) => l.stages.some((x) => x.key === s.key)));
+      const all = stagesOf(last);
+      const slow = slowest(all);
+      const max = Math.max(1, ...all.map((s) => s.ms));
+      const bars = (stages: typeof all) =>
         h('ul', { class: 'bars' }, stages.map((s) =>
           h('li', { class: s.key === slow?.key ? 'slowest' : '' },
             h('span', { class: 'bar-label' }, s.label),
             h('span', { class: 'bar-track' }, h('span', { class: 'bar-fill', style: `width:${Math.max(2, (s.ms / max) * 100)}%` })),
             h('span', { class: 'bar-ms' }, ms(s.ms)),
           ),
-        )),
-        !!slow && stages.length > 1 && h('small', {}, `Slowest stage: ${STAGE_LABELS[slow.key] ?? slow.label}`),
-        !!last.meta.voicePath && h('small', {}, `Voice: ${String(last.meta.voicePath)}${last.meta.audioBytes ? `, ${last.meta.audioBytes} bytes` : ''}`),
+        ));
+      parts.push(
+        h('p', { class: 'timing-head' },
+          h('b', {}, 'Last: '),
+          `end of speech → first sound ${ms(head.toFirstSoundMs)}`,
+          head.toEarMs !== undefined && ` (≈ ${ms(head.toEarMs)} at the ear)`,
+          ` · → screen ${ms(head.toScreenMs)}`,
+          head.allLinesDoneMs !== undefined && ` · all spoken lines done ${ms(head.allLinesDoneMs)}`,
+        ),
+        parentStages.length > 0 && bars(parentStages),
+      );
+      for (const l of lines) {
+        parts.push(
+          h('div', { class: 'timing-line' },
+            h('b', {}, `Line ${l.index + 1}: ${l.kind}`),
+            h('small', {}, ` ${l.chars ?? '?'} chars${l.audioBytes ? `, ${l.audioBytes} bytes` : ''} · voice ${l.voicePath ?? 'unknown'}`),
+            l.stages.length > 0 && bars(l.stages),
+            h('small', {}, [
+              l.soundAtMs !== undefined ? `Audible ${ms(l.soundAtMs)} after speech end` : 'Never became audible',
+              l.lastedMs !== undefined && `, lasted ${ms(l.lastedMs)}`,
+              l.gapMs !== undefined && `, ${ms(l.gapMs)} after the previous line ended`,
+            ].filter(Boolean).join('')),
+          ),
+        );
+      }
+      const withLatency = lines.find((l) => l.outputLatencyMs !== undefined);
+      parts.push(
+        h('small', { class: 'timing-output' },
+          withLatency
+            ? `Output device latency: ${ms(withLatency.outputLatencyMs)} (reported by the browser; Bluetooth speakers are usually much higher).`
+            : 'Output device latency: not reported by this browser, so "first sound" is when the browser started playing, not when it reaches the ear.',
+        ),
+        !!slow && all.length > 1 && h('small', {}, `Slowest stage: ${slow.label}`),
       );
     }
     const sum = summarize(hasVoice ? tracer.all().filter((t) => t.label === 'voice') : tracer.all());
-    const rows = [sum.toFirstSound, sum.toScreen, ...sum.stages].filter((r): r is NonNullable<typeof r> => !!r);
+    const rows = [sum.toFirstSound, sum.toEar, sum.allLinesDone, sum.toScreen, ...sum.stages].filter((r): r is NonNullable<typeof r> => !!r);
     if (rows.length) {
       parts.push(
         h('table', { class: 'timing-table' },

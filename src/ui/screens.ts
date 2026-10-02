@@ -19,6 +19,7 @@ import { settingsScreen } from './settingsScreen';
 import { createFeedback } from './feedback';
 import { createTimingPanel, type TimingPanel } from './timing';
 import { tracer, type TraceRef } from '../perf';
+import { createLatencyProbe } from '../audioLatency';
 import { Onboarding } from './onboarding';
 import { applyAccent } from './display';
 import { setActive, setNavVisible, type Tab } from './nav';
@@ -157,6 +158,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   let voiceDown = false;
   let micBtn: HTMLButtonElement | null = null;
   let timingPanel: TimingPanel | null = null;
+  let lastLatencySource = 'unknown';
   // Voice latency tracing: a trace opens at press / speech start, and is consumed by the next utterance.
   let openTrace: number | null = null;
   const traceFor = (label: string): number => {
@@ -167,11 +169,25 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   const timingContext = () => ({
     userAgent: navigator.userAgent, mic: settings.mic, commentary: settings.commentary,
     voice: (settings.lazybirdKey && settings.voiceId ? 'lazybird' : 'browser') as 'lazybird' | 'browser', speak: settings.speak,
+    outputLatency: lastLatencySource,
   });
-  const speaker = createSpeaker(settings, (busy) => {
-    if (listener) listener.muted = busy && !pttHeld; // don't hear our own voice, unless the user is holding to talk
-  });
-  const say = (text: string, opts?: { ssml?: boolean; plain?: string; trace?: TraceRef }) => {
+  const latencyProbe = createLatencyProbe();
+  latencyProbe.prime(); // we're inside the Start click, so the audio clock is allowed to run
+  const speaker = createSpeaker(
+    settings,
+    (busy) => {
+      if (listener) listener.muted = busy && !pttHeld; // don't hear our own voice, unless the user is holding to talk
+    },
+    (line) => {
+      // Sample the device's output latency at the moment this line became audible.
+      const r = latencyProbe.read();
+      line?.meta('outputLatencySource', r.source);
+      if (r.outputMs !== undefined) line?.meta('outputLatencyMs', r.outputMs);
+      if (r.baseMs !== undefined) line?.meta('baseLatencyMs', r.baseMs);
+      lastLatencySource = r.source;
+    },
+  );
+  const say = (text: string, opts?: { ssml?: boolean; plain?: string; trace?: TraceRef; kind?: string }) => {
     lastSpoken = opts?.plain ?? text;
     speaker.speak(text, opts);
   };
@@ -215,7 +231,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     tr.mark('acted');
     tr.meta('ok', r.ok);
     commentator.onResult(prev, a, r, tr); // side-channel: can never affect the game
-    if (via.voice) say(r.message, { trace: tr }); // confirm aloud anything a voice command changed
+    if (via.voice) say(r.message, { trace: tr, kind: 'confirmation' }); // confirm aloud anything a voice command changed
     render();
     tr.markOnce('screenUpdated');
   };
@@ -246,8 +262,8 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     flashOk = true;
     onboarding.onVoiceCommand();
     tr.mark('textReady');
-    if (type !== 'repeat') say(text, { trace: tr });
-    else speaker.speak(text, { trace: tr }); // a repeat shouldn't overwrite what "repeat" repeats
+    if (type !== 'repeat') say(text, { trace: tr, kind: 'answer' });
+    else speaker.speak(text, { trace: tr, kind: 'answer' }); // a repeat shouldn't overwrite what "repeat" repeats
     render();
     tr.markOnce('screenUpdated');
   };
@@ -325,6 +341,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     listener?.stop();
     speaker.stop();
     unsubTiming();
+    latencyProbe.close();
   };
   const leave = () => {
     cleanup();
@@ -364,6 +381,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
           class: 'mic',
           onpointerdown: () => {
             pttHeld = true;
+            latencyProbe.prime();
             tracer.mark(traceFor('voice'), 'pressed');
             speaker.stop(); // talking over the app interrupts it
             if (listener) listener.muted = false;
