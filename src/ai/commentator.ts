@@ -19,7 +19,7 @@ const SYSTEM =
   'You are the witty host of a card game night. Reply with ONE short playful sentence (max 18 words) reacting to the play. No emojis, no quotes, no rules advice.';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const cardName = (c: Card) => `${c.number === 11 ? 'skip' : c.number === 12 ? 'reverse' : c.number === 13 ? 'plus two' : c.number} of ${c.suit}s`;
+export const cardName = (c: Card) => `${c.number === 11 ? 'skip' : c.number === 12 ? 'reverse' : c.number === 13 ? 'plus two' : c.number} of ${c.suit}s`;
 
 export function momentFor(prev: GameState, action: Action, result: ActionResult): Moment | null {
   if (!result.ok) return null;

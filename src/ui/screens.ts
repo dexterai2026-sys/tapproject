@@ -12,7 +12,8 @@ import { loadSettings } from '../settings';
 import { Commentator } from '../ai/commentator';
 import { createLinePicker } from '../ai/lines';
 import { createSpeaker } from '../ai/speech';
-import { resolveCommand } from '../voice/command';
+import { resolveCommand, type QueryType } from '../voice/command';
+import { answerQuery, HELP_TEXT } from '../voice/answers';
 import { VoiceListener } from '../voice/listener';
 import { settingsScreen } from './settingsScreen';
 import { createFeedback } from './feedback';
@@ -148,12 +149,21 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   let alive = true;
   let listener: VoiceListener | null = null;
 
+  let pttHeld = false;
+  let lastSpoken = '';
+  let listening = false;
+  let voiceDown = false;
+  let micBtn: HTMLButtonElement | null = null;
   const speaker = createSpeaker(settings, (busy) => {
-    if (listener) listener.muted = busy; // don't hear our own voice
+    if (listener) listener.muted = busy && !pttHeld; // don't hear our own voice, unless the user is holding to talk
   });
+  const say = (text: string, opts?: { ssml?: boolean; plain?: string }) => {
+    lastSpoken = opts?.plain ?? text;
+    speaker.speak(text, opts);
+  };
   const commentator = new Commentator({
     settings: () => settings,
-    speak: (text, opts) => speaker.speak(text, opts),
+    speak: (text, opts) => say(text, opts),
     pick: createLinePicker(),
     caption: (t) => {
       caption = t;
@@ -186,7 +196,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     if (via.tap) onboarding.onTap(r.ok);
     if (via.voice && r.ok) onboarding.onVoiceCommand();
     commentator.onResult(prev, a, r); // side-channel: can never affect the game
-    if (via.voice) speaker.speak(r.message); // confirm aloud anything a voice command changed
+    if (via.voice) say(r.message); // confirm aloud anything a voice command changed
     render();
   };
   const onTap = (chipId: string) => {
@@ -206,16 +216,35 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     render();
   });
 
+  const answer = (type: QueryType) => {
+    const text = answerQuery(type, { state, tally: loadTally(), lastSpoken });
+    caption = text;
+    flash = text;
+    flashOk = true;
+    onboarding.onVoiceCommand();
+    if (type !== 'repeat') say(text);
+    else speaker.speak(text); // a repeat shouldn't overwrite what "repeat" repeats
+    render();
+  };
   const onUtterance = async (text: string) => {
     const cmd = await resolveCommand(text, { apiKey: settings.openrouterKey, model: settings.fastModel });
     if (!alive) return;
     const cur = currentPlayer(state.public.turn);
-    if (cmd.type === 'draw') act({ type: 'draw', player: cur }, { voice: true });
-    else if (cmd.type === 'callLast') act({ type: 'callLast', player: state.public.lastCardPending ?? cur }, { voice: true });
-    else {
-      flash = `Didn't catch that: "${text}"`;
-      flashOk = false;
-      render();
+    switch (cmd.type) {
+      case 'draw': return act({ type: 'draw', player: cur }, { voice: true });
+      case 'callLast': return act({ type: 'callLast', player: state.public.lastCardPending ?? cur }, { voice: true });
+      case 'pause': return leave(); // every move is already saved
+      case 'again':
+        if (state.public.status === 'finished') return again();
+        flash = "The game isn't finished yet.";
+        flashOk = false;
+        return render();
+      case 'unknown':
+        flash = `Didn't catch that: "${text}". Say "help" for commands.`;
+        flashOk = false;
+        return render();
+      default:
+        return answer(cmd.type);
     }
   };
   if (settings.mic !== 'off' && VoiceListener.isSupported()) {
@@ -225,6 +254,14 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
       onUtterance: (t) => void onUtterance(t),
       onError: (m) => {
         notice = m;
+        render();
+      },
+      onListening: (on) => {
+        listening = on;
+        if (micBtn) micBtn.textContent = on ? 'Listening…' : 'Hold to talk'; // update in place: re-rendering mid-press would drop the button
+      },
+      onGiveUp: () => {
+        voiceDown = true;
         render();
       },
     });
@@ -280,13 +317,26 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
         notice && h('small', { class: 'warn' }, notice),
       ),
       settings.mic === 'push' && !!listener &&
-        h('button', {
+        (micBtn = h('button', {
           class: 'mic',
-          onpointerdown: () => listener?.start(),
-          onpointerup: () => listener?.stop(),
-          onpointerleave: () => listener?.stop(),
-        }, 'Hold to talk'),
-      settings.mic === 'wake' && !!listener && h('small', {}, `Listening for "${settings.wakeWord}" — try "${settings.wakeWord}, draw".`),
+          onpointerdown: () => {
+            pttHeld = true;
+            speaker.stop(); // talking over the app interrupts it
+            if (listener) listener.muted = false;
+            listener?.start();
+          },
+          onpointerup: () => {
+            pttHeld = false;
+            listener?.stop();
+          },
+          onpointerleave: () => {
+            pttHeld = false;
+            listener?.stop();
+          },
+        }, listening ? 'Listening…' : 'Hold to talk')),
+      settings.mic === 'wake' && !!listener && !voiceDown && h('small', {}, `Listening for "${settings.wakeWord}". Try "${settings.wakeWord}, whose turn" or "${settings.wakeWord}, help".`),
+      voiceDown && h('button', { onclick: () => { voiceDown = false; notice = ''; listener?.start(); render(); } }, 'Voice stopped. Tap to retry'),
+      !!listener && h('small', {}, HELP_TEXT),
       h('ul', { class: 'log' }, [...pub.log].reverse().slice(0, 12).map((l) => h('li', {}, l))),
       pub.status === 'playing' &&
         h('section', { class: 'sim' },

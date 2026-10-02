@@ -1,6 +1,21 @@
 # Tap Cards (MVP prototype)
 
-A deck of NFC playing cards plus a companion web app. Built from the *AI Smart Card Platform – Concept Brief*, following its Build Sequence. Done so far: steps 1–5 (engine, turns, matching game with simulated taps, Web NFC, OpenRouter commentary, Lazybird voice, wake-word / push-to-talk). The native wrapper is deferred.
+A deck of NFC playing cards plus a companion web app. Built from the *AI Smart Card Platform – Concept Brief*, following its Build Sequence. Live site (GitHub Pages): https://dexterai2026-sys.github.io/tapproject/
+
+> **This README is a running document.** Every push updates the **Status** table and adds an entry to the **Running log** at the bottom (newest first).
+
+## Status
+
+| Area | State |
+|---|---|
+| Engine, turns, Match Up game (steps 1–3) | Done, unit-tested (3,000 simulated games finish; no stalemates) |
+| Web NFC tap input + tag registration (step 4) | Built; tested with a mocked reader only, **not on real tags** |
+| OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
+| Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
+| Brief UX decisions (names, pause/resume, sound/haptics, accessibility, nav, onboarding, accents, game-night tally) | Done |
+| Spades + other launch games, The Last Witness | Not started |
+| Multi-device sync, game creation by voice, shared game library, accounts | Not started (later phases) |
+| Server-side API keys, native Capacitor wrapper (step 6) | Not started; keys are pasted by the user for now |
 
 ## Run
 ```
@@ -39,14 +54,53 @@ The tag stores only its factory ID; card meaning lives in the app. Web NFC is un
 Open **Voice & AI settings** on the home screen and paste your own keys. They are stored only in your browser's `localStorage` and sent only to their own service, so this mode is for local testing: a shipped app needs server-side keys (the brief's design).
 - **Commentary:** *Built-in lines* (free, 20+ variations for frequent moments) or *Live AI* (OpenRouter premium model for plays, +2 and wins, capped per game). Any AI failure silently falls back to built-in lines; scoring never depends on it.
 - **Voice out:** Lazybird (click *Load voices*, pick one) or the browser's voice when no key/voice is set. Captions always show.
-- **Voice in (Chrome):** push-to-talk or wake word (default "hey deck"). Commands: "draw", "last card". A local grammar handles them; the fast model is only a fallback for odd phrasing.
+- **Voice in (Chrome):** push-to-talk (hold the mic button, no wake word) or wake word (default "hey deck", then the command). A local grammar handles commands; the fast model is only a fallback for odd phrasing. Commands must be 8 words or fewer.
 - **Lazybird API:** `GET /voices` and `POST /generate-speech` (`{voiceId, text|ssml}` → MP3), matching Lazybird's API reference. Their docs say API keys shouldn't be exposed in browser code, which is exactly what this paste-your-own-key mode does; use it for local testing only and move the calls behind a server before shipping. Lazybird's browser CORS support is untested. OpenRouter and the microphone were also untested against the real services; tests use mocked `fetch` and a fake recognizer.
 
 Use **Check models** in settings to confirm your OpenRouter model ids exist (it calls OpenRouter's `GET /api/v1/model/{author}/{slug}`).
 
 Key hygiene: create the OpenRouter key with a credit limit (OpenRouter recommends this for every key) and delete it if exposed. Never commit keys.
 
-Real-device checklist: paste both keys → Load voices → play a round with Live AI → try push-to-talk "draw" → try "hey deck, last card".
+Real-device checklist: paste both keys → Load voices → play a round with Live AI → try push-to-talk "draw" and "how many cards" → try "hey deck, last card" → say "help".
+
+### Spoken commands (Match Up)
+
+| Say | What happens |
+|---|---|
+| "draw" / "I can't play" / "pick up" / "nothing to play" | Draws for the current player (only allowed with no playable card) |
+| "last card" / "one card left" / "down to one" / "uno" | Calls last card for the player on one card |
+| "whose turn" / "who's up" / "who's next" | Says whose turn it is |
+| "score" / "what's the score" / "who's winning" | Points this game and game-night wins |
+| "how many cards" / "card count" / "cards left" | Cards in each hand |
+| "top card" / "what's on top" | Reads the top card |
+| "repeat" / "say that again" | Repeats the last spoken line |
+| "help" / "what can I say" | Lists the commands |
+| "pause" | Saves and exits to home (resume from Home or Saved) |
+| "play again" / "rematch" | New game, only after a game has finished |
+
+Playing a card is always a tap, never a voice command. Questions never change the game. Examples: "hey deck, whose turn" or hold the mic and say "how many cards".
+
+### Voice reliability
+- **Wake word is forgiving:** "hey dec", "hay deck", "hi tech" etc. still wake it; a false wake does nothing unless a valid command follows.
+- **Backoff:** if the speech service errors (offline etc.), restarts slow down (0.5s, 1s, 2s, 4s…, max 30s) and stop after 5 failures in a row, with a *Voice stopped. Tap to retry* button.
+- **Push-to-talk interrupts the app:** pressing it stops the app's speech and un-mutes the mic. Wake-word mode mutes the mic while the app speaks so it doesn't hear itself.
+- Chrome's speech recognition sends audio to Google's servers, so it needs internet, and wake-word mode keeps the mic open while a game is on. Accuracy in a noisy room is unmeasured; test it on your device.
 
 ## Deploy
 `.github/workflows/pages.yml` publishes `dist/` to GitHub Pages on push to `main` (enable Pages → "GitHub Actions" in repo settings).
+
+## Running log
+
+Newest first. Add an entry with every push.
+
+### 2026-10-02
+- **Voice:** added spoken commands (whose turn, score, how many cards, top card, repeat, help, pause, play again). Added error backoff with give-up and retry, tolerant wake-word matching, push-to-talk interrupting speech, a "Listening…" indicator, and a 20s cap so browser speech can never wedge the queue. Created this Status + Running log. 109 unit tests; browser-tested with a fake recognizer (every command, wake and push modes, backoff, interrupt).
+
+### 2026-10-01
+- `5575fc7` Closed the brief's UX gaps: player names, pause/resume, sound + haptics, text size + high contrast, bottom nav, first-run tutorial, per-game accent, game-night tally. Pushed to `main`; Pages deploy succeeded after enabling Pages → GitHub Actions.
+- `50f8aa4` Added **Check models** to validate OpenRouter model ids.
+- `9a07c84` Warned about OpenRouter credit limits for pasted keys.
+- `684365a` Aligned the Lazybird client with its API reference (`/generate-speech`, `voiceId`).
+- `58e64cb` Step 5: OpenRouter commentary (built-in lines + live AI), Lazybird voice, wake-word / push-to-talk input.
+- `e6fec7b` UI, simulated + Web NFC input, tag registration, Pages workflow.
+- `c1df909` Engine, turn tracking and the Match Up cartridge.

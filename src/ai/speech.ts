@@ -82,13 +82,17 @@ export function playBlobInBrowser(blob: Blob, signal: AbortSignal): Promise<void
   });
 }
 
+const SPEAK_TIMEOUT_MS = 20_000; // some browsers never fire `end`; don't wedge the queue (or keep the mic muted) forever
+
 export function browserSpeak(text: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (typeof speechSynthesis === 'undefined') return resolve();
     const u = new SpeechSynthesisUtterance(text);
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    signal.addEventListener('abort', () => { speechSynthesis.cancel(); resolve(); }, { once: true });
+    const timer = setTimeout(() => { speechSynthesis.cancel(); resolve(); }, SPEAK_TIMEOUT_MS);
+    const done = () => { clearTimeout(timer); resolve(); };
+    u.onend = done;
+    u.onerror = done;
+    signal.addEventListener('abort', () => { speechSynthesis.cancel(); done(); }, { once: true });
     speechSynthesis.speak(u);
   });
 }
