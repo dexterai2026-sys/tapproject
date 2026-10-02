@@ -26,7 +26,9 @@ export interface ListenerOptions {
   /** Called when listening starts or stops (drives the "Listening…" indicator). */
   onListening?: (on: boolean) => void;
   /** Raw recognizer milestones, for latency tracing. Observation only. */
-  onTiming?: (event: 'audioStart' | 'speechStart' | 'speechEnd') => void;
+  onTiming?: (event: 'audioStart' | 'speechStart' | 'speechEnd' | 'interim') => void;
+  /** A final transcript was heard but not acted on (no wake word, or muted). */
+  onDiscard?: () => void;
   /** Called once when repeated failures make the listener stop trying. */
   onGiveUp?: () => void;
   factory?: () => RecognitionLike;
@@ -92,7 +94,7 @@ export class VoiceListener {
     this.active = true;
     const rec = (this.o.factory ?? defaultFactory)();
     rec.continuous = this.o.mode === 'wake';
-    rec.interimResults = false;
+    rec.interimResults = true; // partial results give us a start-of-recognition timestamp when Chrome sends no speechend
     rec.lang = 'en-US';
     rec.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -101,6 +103,8 @@ export class VoiceListener {
           this.gotResult = true;
           this.failures = 0;
           this.handle(r[0].transcript);
+        } else {
+          this.o.onTiming?.('interim');
         }
       }
     };
@@ -172,9 +176,9 @@ export class VoiceListener {
   }
 
   private handle(transcript: string): void {
-    if (this.muted) return;
-    const text = this.o.mode === 'wake' ? stripWakeWord(transcript, this.o.wakeWord) : transcript.trim();
+    const text = this.muted ? null : this.o.mode === 'wake' ? stripWakeWord(transcript, this.o.wakeWord) : transcript.trim();
     if (text) this.o.onUtterance(text);
+    else this.o.onDiscard?.();
   }
 }
 

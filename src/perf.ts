@@ -31,6 +31,8 @@ export interface Trace {
 export interface TraceRef {
   mark(name: string, t?: number): void;
   markOnce(name: string, t?: number): void;
+  /** Record a mark, replacing any earlier one of the same name (e.g. the latest interim result). */
+  set(name: string, t?: number): void;
   meta(key: string, value: MetaValue): void;
   /** Start recording a spoken line. A ref that is already a line returns itself. */
   line(kind: string): TraceRef;
@@ -45,14 +47,15 @@ export interface Stage {
 interface StageSpec {
   key: string;
   label: string;
-  from: string;
+  from: string | string[]; // first mark that exists wins
   to: string;
 }
 
 /** Interaction-level stages: from the press to the moment the reply text exists. */
 const PARENT_STAGES: StageSpec[] = [
   { key: 'micWarmup', label: 'Mic warm-up', from: 'pressed', to: 'audioStart' },
-  { key: 'recognizerFinalize', label: 'Recognizer finalize', from: 'speechEnd', to: 'final' },
+  // Chrome's continuous (wake-word) mode may never report speechend; the last interim result is the next best start.
+  { key: 'recognizerFinalize', label: 'Recognizer finalize', from: ['speechEnd', 'lastInterim'], to: 'final' },
   { key: 'parse', label: 'Parse command', from: 'final', to: 'parsed' },
   { key: 'action', label: 'Game action', from: 'parsed', to: 'acted' },
   { key: 'commentary', label: 'Commentary text', from: 'acted', to: 'textReady' },
@@ -60,10 +63,12 @@ const PARENT_STAGES: StageSpec[] = [
 
 /** Per-spoken-line stages: from the line being queued to it being audible. */
 const LINE_STAGES: StageSpec[] = [
-  { key: 'queueWait', label: 'Speech queue wait', from: 'queued', to: 'synthStart' },
+  { key: 'queueWait', label: 'Request start delay', from: 'queued', to: 'synthStart' },
   { key: 'voiceFirstByte', label: 'Lazybird first byte', from: 'synthStart', to: 'synthFirstByte' },
   { key: 'voiceDownload', label: 'Lazybird download', from: 'synthFirstByte', to: 'synthDone' },
-  { key: 'playbackStart', label: 'Playback start', from: 'synthDone', to: 'playStart' },
+  // Audio (or the browser voice) was ready but an earlier line was still speaking.
+  { key: 'waitBehind', label: 'Waiting behind earlier line', from: 'ready', to: 'dequeued' },
+  { key: 'playbackStart', label: 'Playback start', from: 'cloudPlayBegin', to: 'playStart' },
   { key: 'browserVoiceStart', label: 'Browser voice start', from: 'fallbackStart', to: 'playStart' },
 ];
 
@@ -83,14 +88,14 @@ function firstOf(marks: Mark[], names: string[]): number | undefined {
 function computeStages(marks: Mark[], specs: StageSpec[], keySuffix = '', labelSuffix = ''): Stage[] {
   const out: Stage[] = [];
   for (const s of specs) {
-    const a = markAt(marks, s.from);
+    const a = Array.isArray(s.from) ? firstOf(marks, s.from) : markAt(marks, s.from);
     const b = markAt(marks, s.to);
     if (a !== undefined && b !== undefined && b >= a) out.push({ key: s.key + keySuffix, label: s.label + labelSuffix, ms: Math.round(b - a) });
   }
   return out;
 }
 
-const askedAt = (trace: Trace): number | undefined => firstOf(trace.marks, ['speechEnd', 'final', 'input']);
+const askedAt = (trace: Trace): number | undefined => firstOf(trace.marks, ['speechEnd', 'lastInterim', 'final', 'input']);
 
 export interface LineInfo {
   index: number;
@@ -103,6 +108,9 @@ export interface LineInfo {
   lastedMs?: number; // how long it played
   gapMs?: number; // previous line ended -> this line started
   outputLatencyMs?: number; // device latency Chrome reports for the audio output, when available
+  route?: string; // 'browser' | 'cloud-block' | 'cloud-late'
+  cache?: string; // 'hit' | 'miss' | 'off' (Lazybird audio cache)
+  skipped?: string; // why a line never played, e.g. 'stale'
 }
 
 const num = (v: MetaValue | undefined): number | undefined => (typeof v === 'number' ? v : undefined);
@@ -122,6 +130,9 @@ export function lineInfoOf(trace: Trace): LineInfo[] {
       audioBytes: num(l.meta.audioBytes),
       stages: computeStages(l.marks, LINE_STAGES, i === 0 ? '' : `@${i + 1}`, i === 0 ? '' : ` (line ${i + 1})`),
       outputLatencyMs: num(l.meta.outputLatencyMs),
+      route: typeof l.meta.route === 'string' ? l.meta.route : undefined,
+      cache: typeof l.meta.cache === 'string' ? l.meta.cache : undefined,
+      skipped: typeof l.meta.skipped === 'string' ? l.meta.skipped : undefined,
     };
     if (asked !== undefined && play !== undefined) info.soundAtMs = Math.round(play - asked);
     if (play !== undefined && end !== undefined) info.lastedMs = Math.round(end - play);
@@ -254,6 +265,15 @@ export class Tracer {
     this.changed();
   }
 
+  setMark(id: number, name: string, t = this.now(), line?: number): void {
+    const tg = this.target(id, line);
+    if (!tg) return;
+    const existing = tg.marks.find((m) => m.name === name);
+    if (existing) existing.t = t;
+    else tg.marks.push({ name, t });
+    this.changed();
+  }
+
   markOnce(id: number, name: string, t = this.now(), line?: number): void {
     const tg = this.target(id, line);
     if (tg && !tg.marks.some((m) => m.name === name)) this.mark(id, name, t, line);
@@ -279,6 +299,7 @@ export class Tracer {
     const self: TraceRef = {
       mark: (name, t) => this.mark(id, name, t, line),
       markOnce: (name, t) => this.markOnce(id, name, t, line),
+      set: (name, t) => this.setMark(id, name, t, line),
       meta: (k, v) => this.setMeta(id, k, v, line),
       line: (kind) => (line === undefined ? this.ref(id, this.addLine(id, kind)) : self),
     };
@@ -330,12 +351,22 @@ export interface ExportContext {
 }
 
 /** Shareable results. Contains timings and settings labels only: no keys, no transcripts. */
-export function exportResults(traces: Trace[], ctx: ExportContext) {
+export interface ExportExtras {
+  heard?: { text: string; via: string; command: string; modelMs?: number }[];
+  includeHeardText?: boolean; // transcripts are personal speech: only exported when the user opts in
+}
+
+export function exportResults(traces: Trace[], ctx: ExportContext, extras: ExportExtras = {}) {
+  const heard = extras.heard ?? [];
   return {
     app: 'tap-cards',
     exportedAt: new Date().toISOString(),
     context: ctx,
     summary: summarize(traces),
+    heard: {
+      counts: { grammar: heard.filter((h) => h.via === 'grammar').length, model: heard.filter((h) => h.via === 'model').length, none: heard.filter((h) => h.via === 'none').length },
+      ...(extras.includeHeardText ? { entries: heard } : {}),
+    },
     traces: traces.map((t) => ({
       label: t.label,
       startedAt: new Date(t.startedAt).toISOString(),
@@ -352,6 +383,9 @@ export function exportResults(traces: Trace[], ctx: ExportContext) {
         lastedMs: l.lastedMs,
         gapMs: l.gapMs,
         outputLatencyMs: l.outputLatencyMs,
+        route: l.route,
+        cache: l.cache,
+        skipped: l.skipped,
         stages: Object.fromEntries(l.stages.map((s) => [s.key, s.ms])),
       })),
     })),

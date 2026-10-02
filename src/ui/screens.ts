@@ -11,8 +11,9 @@ import { loadChipMap, saveChipMap } from '../storage';
 import { loadSettings } from '../settings';
 import { Commentator } from '../ai/commentator';
 import { createLinePicker } from '../ai/lines';
-import { createSpeaker } from '../ai/speech';
-import { resolveCommand, type QueryType } from '../voice/command';
+import { createSpeaker, unlockAudio } from '../ai/speech';
+import { resolveDetailed, type QueryType } from '../voice/command';
+import { addHeard, type HeardEntry } from '../voice/heard';
 import { answerQuery, HELP_TEXT } from '../voice/answers';
 import { VoiceListener } from '../voice/listener';
 import { settingsScreen } from './settingsScreen';
@@ -135,6 +136,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   setActive(null);
   setNavVisible(false);
   applyAccent(game.accent);
+  unlockAudio(); // we're inside a tap: keeps later asynchronous speech allowed on iOS
   let state: GameState = resume ?? startGame(game, players, rng);
   const sim = new SimulatedInput();
   const chipMap: ChipMap = realNfc ? loadChipMap() : simulatedChipMap();
@@ -158,6 +160,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   let voiceDown = false;
   let micBtn: HTMLButtonElement | null = null;
   let timingPanel: TimingPanel | null = null;
+  let heard: HeardEntry[] = [];
   let lastLatencySource = 'unknown';
   // Voice latency tracing: a trace opens at press / speech start, and is consumed by the next utterance.
   let openTrace: number | null = null;
@@ -207,6 +210,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
 
   // Every input (tap, key, button, voice) funnels through here.
   const act = (a: Action, via: { tap?: boolean; voice?: boolean; trace?: number } = {}) => {
+    speaker.newInteraction(); // flavor lines still synthesizing for an older interaction are stale now
     const traceId = via.trace ?? tracer.start(via.tap ? 'tap' : 'action');
     if (!via.trace) tracer.mark(traceId, 'input');
     const tr = tracer.ref(traceId);
@@ -230,8 +234,8 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     if (via.voice && r.ok) onboarding.onVoiceCommand();
     tr.mark('acted');
     tr.meta('ok', r.ok);
+    if (via.voice) say(r.message, { trace: tr, kind: 'confirmation' }); // confirm aloud first: short, instant, and what the player is waiting for
     commentator.onResult(prev, a, r, tr); // side-channel: can never affect the game
-    if (via.voice) say(r.message, { trace: tr, kind: 'confirmation' }); // confirm aloud anything a voice command changed
     render();
     tr.markOnce('screenUpdated');
   };
@@ -253,6 +257,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
   });
 
   const answer = (type: QueryType, traceId: number) => {
+    speaker.newInteraction();
     const tr = tracer.ref(traceId);
     tr.mark('acted');
     tr.meta('command', type);
@@ -273,13 +278,16 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
     const tr = tracer.ref(traceId);
     tr.mark('final');
     tr.meta('mode', settings.mic);
-    const cmd = await resolveCommand(text, {
+    const { cmd, via: how, modelMs } = await resolveDetailed(text, {
       apiKey: settings.openrouterKey,
       model: settings.fastModel,
       onFallbackTiming: (ms) => tr.meta('llmParseMs', ms),
     });
     tr.mark('parsed');
     tr.meta('command', cmd.type);
+    tr.meta('resolvedVia', how);
+    heard = addHeard(heard, { text, via: how, command: cmd.type, modelMs });
+    timingPanel?.update();
     if (!alive) return;
     const cur = currentPlayer(state.public.turn);
     switch (cmd.type) {
@@ -311,8 +319,14 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
         render();
       },
       onTiming: (event) => {
-        if (event === 'speechEnd') tracer.mark(traceFor('voice'), 'speechEnd');
-        else tracer.mark(traceFor('voice'), event);
+        const id = traceFor('voice');
+        if (event === 'interim') {
+          tracer.markOnce(id, 'firstInterim');
+          tracer.setMark(id, 'lastInterim'); // the latest partial result: start point when Chrome sends no speechend
+        } else tracer.mark(id, event);
+      },
+      onDiscard: () => {
+        openTrace = null; // chatter without a wake word: don't let its marks leak into the next real command
       },
       onListening: (on) => {
         listening = on;
@@ -399,7 +413,7 @@ function gameScreen(game: Cartridge, players: Player[], realNfc: boolean, resume
       settings.mic === 'wake' && !!listener && !voiceDown && h('small', {}, `Listening for "${settings.wakeWord}". Try "${settings.wakeWord}, whose turn" or "${settings.wakeWord}, help".`),
       voiceDown && h('button', { onclick: () => { voiceDown = false; notice = ''; listener?.start(); render(); } }, 'Voice stopped. Tap to retry'),
       !!listener && h('small', {}, HELP_TEXT),
-      settings.showTiming && (timingPanel = createTimingPanel(tracer, timingContext)).el,
+      settings.showTiming && (timingPanel = createTimingPanel(tracer, timingContext, () => heard)).el,
       h('ul', { class: 'log' }, [...pub.log].reverse().slice(0, 12).map((l) => h('li', {}, l))),
       pub.status === 'playing' &&
         h('section', { class: 'sim' },

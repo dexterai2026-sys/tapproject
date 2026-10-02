@@ -13,6 +13,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
 | Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
+| Voice speed: hybrid voice, pipelined + cached Lazybird, heard-text, wake-word timing | Built; verified in a browser against a mocked 4s Lazybird (answers audible in ~440ms, repeats from cache in ~470ms). **Real-phone gain, iOS behavior and voice quality still to confirm** |
 | Brief UX decisions (names, pause/resume, sound/haptics, accessibility, nav, onboarding, accents, game-night tally) | Done |
 | Spades + other launch games, The Last Witness | Not started |
 | Multi-device sync, game creation by voice, shared game library, accounts | Not started (later phases) |
@@ -87,6 +88,18 @@ Playing a card is always a tap, never a voice command. Questions never change th
 - **Push-to-talk interrupts the app:** pressing it stops the app's speech and un-mutes the mic. Wake-word mode mutes the mic while the app speaks so it doesn't hear itself.
 - Chrome's speech recognition sends audio to Google's servers, so it needs internet, and wake-word mode keeps the mic open while a game is on. Accuracy in a noisy room is unmeasured; test it on your device.
 
+## Voice speed: hybrid voice, cache, pipelining
+
+First real-phone numbers (Android Chrome, wake word, Lazybird): **5.6s from transcript to first sound**, of which **4.3s was Lazybird** generating a 16-character line and 1.2s was an OpenRouter call because my grammar didn't recognise the phrase. So:
+
+- **Hybrid voice (default).** Quick, functional lines (answers, spoken confirmations, errors, "X, you're up") are spoken instantly by **this device's own voice**. Only reactions ("Nice play") use Lazybird. Change it in Settings → *Voice mode*: *Hybrid*, *Lazybird for everything*, or *This device's voice only*. You can pick the device voice and speed there and test it. Without a Lazybird key everything uses the device voice.
+- **Flavor lines never hold anything up.** A Lazybird reaction is requested immediately, plays whenever its audio is ready, and is dropped if a newer move happened in the meantime. A confirmation ("Sam draws 1") is now spoken before the reaction.
+- **Pipelined.** Lazybird audio is requested as soon as a line is queued, not when it reaches the front, so two lines no longer wait on each other to download.
+- **Cached.** Synthesized lines are stored in IndexedDB (about 150 lines / 15MB, oldest evicted). Repeating a line plays with no request. In the Timing panel each line shows `cache hit` or `miss`.
+- **iOS.** The device-voice path uses the Web Speech synthesis built into WebKit, so it should work on iOS Safari. Both speech and audio must start from a tap, so the Start button does a silent "unlock". Not tested on a real iPhone. NFC and the wake-word mic still need the native wrapper on iOS (step 6).
+- **What it heard.** The Timing panel lists the last 20 things the recognizer heard and how each was understood (*grammar*, *model*, or *no match*), so grammar misses are easy to spot and fix. It stays on screen: *Copy results* includes only counts unless you tick **Include what I said**.
+- **Wake-word timing.** Chrome often sends no "speech ended" signal in wake-word mode, so recognizer time is now measured from the last partial result. Chatter without the wake word no longer leaks into the next command's timing.
+
 ## Measuring voice latency
 
 Every game screen has a **Timing** panel (hide it in Settings → *Show voice timing panel*). After a voice command it shows where the time went, from the moment you stop talking:
@@ -118,6 +131,9 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-02 (hybrid voice + cache)
+- **Voice speed:** first real-phone export showed 5.6s to first sound (Lazybird first byte 4.3s, plus a 1.2s OpenRouter call for a phrase the grammar missed). Added **hybrid voice** (quick lines on the device voice, personality via Lazybird, with a voice/speed picker and Voice mode setting), **pipelined** synthesis, an **IndexedDB audio cache**, **late flavor lines** that never block and are dropped when stale, confirmations spoken before reactions, the turn announcement as its own instant line, an **iOS unlock** on Start, an on-screen **heard-text** list (export is opt-in), interim-result timing for wake-word mode, and wider grammar (whose go, who's leading, how many do I have, what's showing…). 184 unit tests; 33 new browser checks against a mocked 4s Lazybird.
 
 ### 2026-10-02 (latency: lines + output latency)
 - **Timing panel:** every spoken line is now traced separately (reaction, confirmation, answer), with when it became audible, how long it lasted, and the gap after the previous line. Added output-device latency (read from Chrome's audio clock when available, never guessed) and an "at the ear" estimate. "All lines done" is only shown once every line has finished. First finding from the mocked run: line 2's Lazybird request starts only after line 1 finishes playing, which makes its queue wait the slowest stage. 145 unit tests; browser-verified with a fake audio device reporting 120ms and one reporting none.

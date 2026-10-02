@@ -1,7 +1,9 @@
 import { h } from './dom';
 import { exportResults, headlineOf, lineInfoOf, slowest, stagesOf, summarize, type ExportContext, type Tracer } from '../perf';
+import type { HeardEntry } from '../voice/heard';
 
 let panelOpen = true; // remembered across re-renders of the game screen
+let includeSpeech = false; // opt-in, never persisted: transcripts stay on screen unless ticked
 
 const ms = (n: number | undefined): string => (n === undefined ? '–' : `${n.toLocaleString('en-US')} ms`);
 
@@ -11,7 +13,7 @@ export interface TimingPanel {
 }
 
 /** Live latency readout for the voice pipeline, plus a button that copies the raw results. */
-export function createTimingPanel(tracer: Tracer, context: () => ExportContext): TimingPanel {
+export function createTimingPanel(tracer: Tracer, context: () => ExportContext, heard: () => HeardEntry[] = () => []): TimingPanel {
   const body = h('div', { class: 'timing-body' });
   const el = h('details', { class: 'timing', open: panelOpen, ontoggle: (e: Event) => (panelOpen = (e.target as HTMLDetailsElement).open) },
     h('summary', {}, 'Timing'),
@@ -54,10 +56,10 @@ export function createTimingPanel(tracer: Tracer, context: () => ExportContext):
         parts.push(
           h('div', { class: 'timing-line' },
             h('b', {}, `Line ${l.index + 1}: ${l.kind}`),
-            h('small', {}, ` ${l.chars ?? '?'} chars${l.audioBytes ? `, ${l.audioBytes} bytes` : ''} · voice ${l.voicePath ?? 'unknown'}`),
+            h('small', {}, ` ${l.chars ?? '?'} chars${l.audioBytes ? `, ${l.audioBytes} bytes` : ''} · voice ${l.voicePath ?? 'unknown'}${l.cache && l.cache !== 'off' ? ` · cache ${l.cache}` : ''}${l.route ? ` · ${l.route}` : ''}`),
             l.stages.length > 0 && bars(l.stages),
             h('small', {}, [
-              l.soundAtMs !== undefined ? `Audible ${ms(l.soundAtMs)} after speech end` : 'Never became audible',
+              l.soundAtMs !== undefined ? `Audible ${ms(l.soundAtMs)} after speech end` : l.skipped ? `Skipped (${l.skipped})` : 'Never became audible',
               l.lastedMs !== undefined && `, lasted ${ms(l.lastedMs)}`,
               l.gapMs !== undefined && `, ${ms(l.gapMs)} after the previous line ended`,
             ].filter(Boolean).join('')),
@@ -84,7 +86,22 @@ export function createTimingPanel(tracer: Tracer, context: () => ExportContext):
         ),
       );
     }
+    const heardList = heard();
+    if (heardList.length) {
+      parts.push(
+        h('div', { class: 'timing-heard' },
+          h('b', {}, 'What it heard'),
+          h('ul', {}, [...heardList].reverse().map((e) =>
+            h('li', { class: e.via === 'none' ? 'err' : '' },
+              `"${e.text}" → ${e.command} `,
+              h('small', {}, e.via === 'grammar' ? '(grammar)' : e.via === 'model' ? `(model, ${ms(e.modelMs)})` : '(no match)'),
+            ),
+          )),
+        ),
+      );
+    }
     parts.push(
+      h('label', {}, h('input', { type: 'checkbox', checked: includeSpeech, onchange: (e: Event) => (includeSpeech = (e.target as HTMLInputElement).checked) }), ' Include what I said in Copy results'),
       h('button', { onclick: () => void copy(body) }, 'Copy results'),
       h('button', { class: 'link', onclick: () => tracer.clear() }, 'Clear'),
     );
@@ -92,7 +109,7 @@ export function createTimingPanel(tracer: Tracer, context: () => ExportContext):
   }
 
   async function copy(container: HTMLElement): Promise<void> {
-    const json = JSON.stringify(exportResults(tracer.all(), context()), null, 2);
+    const json = JSON.stringify(exportResults(tracer.all(), context(), { heard: heard(), includeHeardText: includeSpeech }), null, 2);
     container.querySelector('.timing-copy')?.remove();
     try {
       await navigator.clipboard.writeText(json);

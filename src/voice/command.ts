@@ -57,10 +57,10 @@ export function parseCommand(text: string): VoiceCommand {
   if (!t || w.length > MAX_WORDS) return { type: 'unknown' };
   if (/\b(last card|one card( left)?|down to one|call it|uno)\b/.test(t)) return { type: 'callLast' };
   if (/\b(draw|pick (one )?up|i can'?t play|nothing to play|no play)\b/.test(t)) return { type: 'draw' };
-  if (/\b(whose|who'?s|who is) (turn|up|next)\b/.test(t)) return { type: 'turn' };
-  if (/\b(how many cards|card count|cards left|cards are left)\b/.test(t)) return { type: 'cards' };
-  if (/\b(score|scores|points|who'?s (winning|ahead))\b/.test(t)) return { type: 'score' };
-  if (/\b(top card|on top)\b/.test(t)) return { type: 'top' };
+  if (/\b(whose|who'?s|who is) (turn|up|next|go|move|going|playing)\b/.test(t) || /\b(who goes next|who plays next|my turn|whose go)\b/.test(t)) return { type: 'turn' };
+  if (/\b(how many cards|card count|cards left|cards are left|how many (do|does)|how many in)\b/.test(t)) return { type: 'cards' };
+  if (/\b(score|scores|points|who('?s| is) (winning|ahead|leading|in the lead)|how am i doing)\b/.test(t)) return { type: 'score' };
+  if (/\b(top card|on top|what card is (up|showing|out)|what'?s showing|current card)\b/.test(t)) return { type: 'top' };
   if (/\b(repeat|say that again|say again|what was that)\b/.test(t)) return { type: 'repeat' };
   if (/\b(help|what can i say|commands)\b/.test(t)) return { type: 'help' };
   if (/\bpause\b/.test(t)) return { type: 'pause' };
@@ -82,12 +82,22 @@ export interface ResolveOptions {
   onFallbackTiming?: (ms: number) => void;
 }
 
+/** How a command was understood: our own grammar, the fallback model, or not at all. */
+export type ResolvedVia = 'grammar' | 'model' | 'none';
+
+export interface Resolved {
+  cmd: VoiceCommand;
+  via: ResolvedVia;
+  modelMs?: number;
+}
+
 /** Local grammar first; the cheap model only as a fallback for odd phrasing. */
-export async function resolveCommand(text: string, o: ResolveOptions = {}): Promise<VoiceCommand> {
+export async function resolveDetailed(text: string, o: ResolveOptions = {}): Promise<Resolved> {
   const local = parseCommand(text);
-  if (local.type !== 'unknown' || !o.apiKey || !o.model) return local;
-  if (words(text).length > MAX_WORDS) return local;
+  if (local.type !== 'unknown') return { cmd: local, via: 'grammar' };
+  if (!o.apiKey || !o.model || words(text).length > MAX_WORDS) return { cmd: local, via: 'none' };
   const started = performance.now();
+  let cmd: VoiceCommand = { type: 'unknown' };
   try {
     const reply = await (o.chatImpl ?? chat)({
       apiKey: o.apiKey,
@@ -101,10 +111,15 @@ export async function resolveCommand(text: string, o: ResolveOptions = {}): Prom
       ],
     });
     const word = reply.toLowerCase().match(/[a-z]+/)?.[0] ?? '';
-    return LABELS[word] ?? { type: 'unknown' };
+    cmd = LABELS[word] ?? { type: 'unknown' };
   } catch {
-    return { type: 'unknown' };
-  } finally {
-    o.onFallbackTiming?.(Math.round(performance.now() - started));
+    /* fall through: unknown */
   }
+  const modelMs = Math.round(performance.now() - started);
+  o.onFallbackTiming?.(modelMs);
+  return { cmd, via: cmd.type === 'unknown' ? 'none' : 'model', modelMs };
+}
+
+export async function resolveCommand(text: string, o: ResolveOptions = {}): Promise<VoiceCommand> {
+  return (await resolveDetailed(text, o)).cmd;
 }

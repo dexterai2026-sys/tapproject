@@ -1,5 +1,6 @@
 export type CommentaryMode = 'off' | 'canned' | 'live';
 export type MicMode = 'off' | 'push' | 'wake';
+export type VoiceMode = 'hybrid' | 'lazybird' | 'browser';
 
 export type TextSize = 'S' | 'M' | 'L' | 'XL';
 
@@ -18,6 +19,9 @@ export interface Settings {
   highContrast: boolean;
   sound: boolean; // audio cues (vibration is separate and always on where supported)
   showTiming: boolean; // latency panel on the game screen
+  voiceMode: VoiceMode; // hybrid = quick lines on-device, personality via Lazybird
+  browserVoice: string; // voiceURI of the on-device voice, '' = best English voice
+  browserRate: number; // on-device speech speed, 1 = normal
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -35,6 +39,9 @@ export const DEFAULT_SETTINGS: Settings = {
   highContrast: false,
   sound: true,
   showTiming: true,
+  voiceMode: 'hybrid',
+  browserVoice: '',
+  browserRate: 1.05,
 };
 
 const KEY = 'tap.settings.v1';

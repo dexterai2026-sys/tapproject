@@ -63,9 +63,11 @@ export class Commentator {
       trace?.meta('moment', moment);
       this.deps.caption(text);
       trace?.markOnce('captionShown');
+      // Two separate lines: the reaction is personality (may be slow or skipped), the turn announcement is functional (must be quick).
       if (DRAMATIC.includes(moment)) {
-        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/>${esc(turnLine)}</speak>`, { ssml: true, plain: text, trace, kind: 'reaction' });
-      } else this.deps.speak(text, { trace, kind: 'reaction' });
+        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/></speak>`, { ssml: true, plain: line, trace, kind: 'reaction' });
+      } else this.deps.speak(line, { trace, kind: 'reaction' });
+      if (turnLine) this.deps.speak(turnLine, { trace, kind: 'turn' });
     };
 
     if (s.commentary === 'live' && s.openrouterKey && LIVE_MOMENTS.includes(moment) && this.liveUsed < s.liveCap) {

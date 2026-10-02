@@ -6,6 +6,8 @@ import { VoiceListener } from '../voice/listener';
 import { applyDisplay } from './display';
 import { setActive, setNavVisible } from './nav';
 import { setOnboarded } from '../save';
+import { pickBrowserVoice } from '../ai/voiceRouter';
+import { browserSpeak } from '../ai/speech';
 
 const CURATED_VOICES = 6;
 
@@ -24,6 +26,20 @@ export function settingsScreen(onBack: () => void): void {
     el.value = String(s[key]);
     return el;
   };
+
+  const deviceVoices = (): SpeechSynthesisVoice[] => {
+    try {
+      return typeof speechSynthesis === 'undefined' ? [] : speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith('en'));
+    } catch {
+      return [];
+    }
+  };
+  try {
+    // Voices load asynchronously on some browsers: refresh the picker when they arrive.
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.onvoiceschanged = () => render();
+  } catch {
+    /* unsupported */
+  }
 
   function render(): void {
     const micOk = VoiceListener.isSupported();
@@ -65,6 +81,26 @@ export function settingsScreen(onBack: () => void): void {
           render();
         } }, 'Load voices'),
         h('label', {}, 'Voice', select('voiceId', voices.length ? voices.map((v): [string, string] => [v.id, v.name]) : [['', 'Browser voice (no Lazybird voice chosen)']])),
+        h('label', {}, 'Voice mode', select('voiceMode', [
+          ['hybrid', 'Hybrid: quick lines on this device, personality via Lazybird (fastest)'],
+          ['lazybird', 'Lazybird for everything (slower, one consistent voice)'],
+          ['browser', 'This device\'s voice only (works offline, no Lazybird needed)'],
+        ])),
+        h('label', {}, 'Device voice', (() => {
+          const voices = deviceVoices();
+          const el = h('select', { onchange: (e: Event) => (s.browserVoice = (e.target as HTMLSelectElement).value) },
+            h('option', { value: '' }, voices.length ? 'Best English voice (automatic)' : 'Automatic (no voices listed yet)'),
+            ...voices.map((v) => h('option', { value: v.voiceURI }, `${v.name} (${v.lang}${v.localService ? ', on-device' : ', online'})`))) as HTMLSelectElement;
+          el.value = s.browserVoice;
+          return el;
+        })()),
+        h('label', {}, 'Device voice speed ', h('input', { type: 'number', min: 0.7, max: 1.6, step: 0.05, value: s.browserRate, oninput: (e: Event) => (s.browserRate = Number((e.target as HTMLInputElement).value) || 1) })),
+        h('button', { onclick: () => {
+          const voice = pickBrowserVoice(deviceVoices(), s.browserVoice);
+          status = voice ? `Speaking with ${voice.name}.` : 'No English voice found on this device.';
+          void browserSpeak('Whose turn is it? Player one, you are up.', new AbortController().signal, undefined, { voiceURI: s.browserVoice, rate: s.browserRate });
+          render();
+        } }, 'Test device voice'),
         h('label', {}, h('input', { type: 'checkbox', checked: s.speak, onchange: (e: Event) => (s.speak = (e.target as HTMLInputElement).checked) }), ' Read lines aloud'),
       ),
       h('fieldset', {}, h('legend', {}, 'Microphone'),

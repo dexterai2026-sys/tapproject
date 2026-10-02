@@ -47,16 +47,16 @@ describe('momentFor', () => {
 
 function harness(over: Partial<Settings> = {}, chatImpl?: (o: never) => Promise<string>) {
   const settings = { ...DEFAULT_SETTINGS, ...over };
-  const spoken: string[] = []; const captions: string[] = []; const notices: string[] = [];
+  const spoken: string[] = []; const kinds: string[] = []; const captions: string[] = []; const notices: string[] = [];
   const c = new Commentator({
     settings: () => settings,
-    speak: (t) => spoken.push(t),
+    speak: (t, o) => { spoken.push(t); kinds.push(o?.kind ?? ''); },
     pick: (m, v) => `[${m}:${v.name}]`,
     caption: (t) => captions.push(t),
     notice: (m) => notices.push(m),
     chatImpl: chatImpl as never,
   });
-  return { c, spoken, captions, notices };
+  return { c, spoken, kinds, captions, notices };
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -76,7 +76,10 @@ describe('Commentator', () => {
     const h = harness({ commentary: 'canned', openrouterKey: 'k' }, chatImpl);
     const { a, r } = play(s, 'p0', 'star-9');
     h.c.onResult(s, a, r);
-    expect(h.spoken).toEqual(['[play:P0] [turn:P0]']);
+    // Two separate lines: personality (reaction) and the functional "your turn" announcement.
+    expect(h.spoken).toEqual(['[play:P0]', '[turn:P0]']);
+    expect(h.kinds).toEqual(['reaction', 'turn']);
+    expect(h.captions).toEqual(['[play:P0] [turn:P0]']); // the caption still reads as one sentence
     expect(h.captions).toHaveLength(1);
     expect(chatImpl).not.toHaveBeenCalled();
   });
@@ -88,9 +91,11 @@ describe('Commentator', () => {
     expect(chatImpl).toHaveBeenCalledOnce();
     expect((chatImpl.mock.calls[0] as unknown as [{ model: string }])[0].model).toBe('prem');
     expect(h.spoken[0]).toContain('Spicy!');
+    expect(h.spoken[1]).toBe('[turn:P0]');
     h.c.onResult(s, a, r); await tick(); // over cap -> canned
     expect(chatImpl).toHaveBeenCalledOnce();
-    expect(h.spoken[1]).toContain('[play:P0]');
+    expect(h.spoken[2]).toContain('[play:P0]');
+    expect(h.kinds.slice(0, 3)).toEqual(['reaction', 'turn', 'reaction']);
   });
   it('live failure falls back to the pool line and posts a notice', async () => {
     const h = harness({ commentary: 'live', openrouterKey: 'k' }, async () => { throw new Error('boom'); });
@@ -105,7 +110,7 @@ describe('Commentator', () => {
     const { a, r } = play(s, 'p0', 'star-9');
     h.c.onResult(s, a, r);
     expect(chatImpl).not.toHaveBeenCalled();
-    expect(h.spoken).toHaveLength(1);
+    expect(h.spoken).toHaveLength(2); // reaction + turn line
   });
 });
 

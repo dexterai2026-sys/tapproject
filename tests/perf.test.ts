@@ -20,7 +20,7 @@ const trace = (marks: Record<string, number>, meta: Trace['meta'] = {}, label = 
 });
 
 describe('stage math', () => {
-  const line1 = lineOf(0, 'reaction', { queued: 2911, synthStart: 2912, synthFirstByte: 3700, synthDone: 3900, playStart: 3980, playEnd: 6000 },
+  const line1 = lineOf(0, 'reaction', { queued: 2911, synthStart: 2912, synthFirstByte: 3700, synthDone: 3900, ready: 3900, dequeued: 2912, cloudPlayBegin: 3900, playStart: 3980, playEnd: 6000 },
     { textChars: 40, voicePath: 'lazybird', audioBytes: 9000, outputLatencyMs: 120 });
   const full = trace({
     pressed: 1000, audioStart: 1150, speechStart: 1300, speechEnd: 2000, final: 2900, parsed: 2905, acted: 2910,
@@ -32,6 +32,7 @@ describe('stage math', () => {
       micWarmup: 150, recognizerFinalize: 900, parse: 5, action: 5, commentary: 0, queueWait: 1,
       voiceFirstByte: 788, voiceDownload: 200, playbackStart: 80,
     });
+    expect(s.waitBehind).toBeUndefined(); // it was dequeued before its audio was ready: nothing waited behind anything
     expect(s.browserVoiceStart).toBeUndefined(); // only when the browser fallback ran
   });
   it('headline numbers are measured from the end of speech, with the output latency added for "at the ear"', () => {
@@ -64,26 +65,27 @@ describe('stage math', () => {
 });
 
 describe('two spoken lines in one interaction', () => {
-  // reaction (long) then confirmation (short), both from one voice command
-  const l1 = lineOf(0, 'reaction', { queued: 100, synthStart: 100, synthFirstByte: 700, synthDone: 800, playStart: 850, playEnd: 3000 }, { textChars: 60 });
-  const l2 = lineOf(1, 'confirmation', { queued: 105, synthStart: 3000, synthFirstByte: 3300, synthDone: 3350, playStart: 3400, playEnd: 4200 }, { textChars: 18, outputLatencyMs: 90 });
+  // Pipelined: line 2's audio was requested at the same time as line 1's, then waited its turn to play.
+  const l1 = lineOf(0, 'reaction', { queued: 100, synthStart: 100, synthFirstByte: 700, synthDone: 800, ready: 800, dequeued: 100, cloudPlayBegin: 800, playStart: 850, playEnd: 3000 }, { textChars: 60 });
+  const l2 = lineOf(1, 'confirmation', { queued: 105, synthStart: 105, synthFirstByte: 405, synthDone: 455, ready: 455, dequeued: 3000, cloudPlayBegin: 3000, playStart: 3050, playEnd: 3850 }, { textChars: 18, outputLatencyMs: 90 });
   const t = trace({ speechEnd: 0, final: 500, screenUpdated: 520 }, {}, 'voice', [l1, l2]);
-  it('keeps each line separate: line 2 stages get a suffix and its own queue wait', () => {
+  it('keeps each line separate: line 2 stages get a suffix; its request started immediately and it then waited behind line 1', () => {
     const s = Object.fromEntries(stagesOf(t).map((x) => [x.key, x.ms]));
-    expect(s.queueWait).toBe(0);
-    expect(s['queueWait@2']).toBe(2895); // waited behind the whole first line
+    expect(s['queueWait@2']).toBe(0); // pipelined: no delay before its Lazybird request
     expect(s['voiceFirstByte@2']).toBe(300);
+    expect(s['waitBehind@2']).toBe(2545); // audio ready at 455, line 1 still speaking until 3000
+    expect(s['playbackStart@2']).toBe(50);
     expect(s.voiceFirstByte).toBe(600);
-    expect(stagesOf(t).find((x) => x.key === 'queueWait@2')!.label).toBe('Speech queue wait (line 2)');
+    expect(stagesOf(t).find((x) => x.key === 'waitBehind@2')!.label).toBe('Waiting behind earlier line (line 2)');
   });
   it('reports when each line was audible, how long it lasted, and the gap between them', () => {
     const [a, b] = lineInfoOf(t);
     expect(a).toMatchObject({ kind: 'reaction', chars: 60, soundAtMs: 850, lastedMs: 2150 });
     expect(a!.gapMs).toBeUndefined();
-    expect(b).toMatchObject({ kind: 'confirmation', chars: 18, soundAtMs: 3400, lastedMs: 800, gapMs: 400, outputLatencyMs: 90 });
+    expect(b).toMatchObject({ kind: 'confirmation', chars: 18, soundAtMs: 3050, lastedMs: 800, gapMs: 50, outputLatencyMs: 90 });
   });
   it('headline: first sound is the earliest line; all-lines-done is the last line end', () => {
-    expect(headlineOf(t)).toMatchObject({ toFirstSoundMs: 850, allLinesDoneMs: 4200, playbackMs: 2150 });
+    expect(headlineOf(t)).toMatchObject({ toFirstSoundMs: 850, allLinesDoneMs: 3850, playbackMs: 2150 });
     expect(headlineOf(t).outputLatencyMs).toBeUndefined(); // line 1 (the first audible) reported none
   });
   it('a confirmation that plays first becomes the first-sound line', () => {
@@ -254,7 +256,7 @@ describe('Speaker timing', () => {
     await sleep(250);
     const line = lineMarks(t, id);
     expect(line.kind).toBe('reaction');
-    const order = ['queued', 'synthStart', 'synthFirstByte', 'synthDone', 'playStart', 'playEnd'];
+    const order = ['queued', 'synthStart', 'synthFirstByte', 'synthDone', 'ready', 'cloudPlayBegin', 'playStart', 'playEnd'];
     const at = (n: string) => line.marks.find((m) => m.name === n)!.t;
     for (let i = 1; i < order.length; i++) expect(at(order[i]!), order[i]).toBeGreaterThanOrEqual(at(order[i - 1]!));
     const s = Object.fromEntries(stagesOf(t.get(id)!).map((x) => [x.key, x.ms]));
@@ -264,7 +266,7 @@ describe('Speaker timing', () => {
     expect(line.meta).toMatchObject({ voicePath: 'lazybird', audioBytes: 1234, textChars: 11 });
     expect(t.get(id)!.marks.some((m) => m.name === 'queued')).toBe(false); // line marks stay on the line
   });
-  it('two lines from one interaction are traced separately; the second waits behind the first', async () => {
+  it('two lines are traced separately; synthesis overlaps while playback stays in order', async () => {
     const t = new Tracer(); const id = t.start('voice');
     const sp = new Speaker({ synth: async () => { await sleep(50); return new Blob(['x']); }, playBlob: async (_b, _s, on) => { on?.(); await sleep(80); } });
     const ref = t.ref(id);
@@ -276,10 +278,11 @@ describe('Speaker timing', () => {
     expect(tr.lines.map((l) => l.kind)).toEqual(['reaction', 'confirmation']);
     const [a, b] = lineInfoOf(tr);
     expect(a!.chars).toBe(10); expect(b!.chars).toBe(6);
-    const wait = stagesOf(tr).find((x) => x.key === 'queueWait@2')!.ms;
-    expect(wait).toBeGreaterThanOrEqual(110); // behind ~130ms of the first line
+    const s = Object.fromEntries(stagesOf(tr).map((x) => [x.key, x.ms]));
+    expect(s['queueWait@2']).toBeLessThan(20); // pipelined: line 2's request did not wait for line 1
+    expect(s['waitBehind@2']).toBeGreaterThanOrEqual(60); // its audio was ready while line 1 spoke (~80ms)
     expect(b!.soundAtMs! > a!.soundAtMs!).toBe(true);
-    expect(b!.gapMs).toBeGreaterThanOrEqual(0);
+    expect(b!.gapMs).toBeLessThan(40); // starts right after line 1: no second synthesis wait
     expect(headlineOf(tr).allLinesDoneMs).toBeGreaterThan(b!.soundAtMs!); // the last line finishes after it starts
   });
   it('records the browser-voice path, and flags when it was a fallback after Lazybird failed', async () => {
