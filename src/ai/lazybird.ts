@@ -51,15 +51,25 @@ export async function listVoices(o: Opts): Promise<Voice[]> {
     .filter((v) => v.id);
 }
 
+export interface SynthTiming {
+  startedAt: number; // performance.now() when the request was sent
+  firstByteAt: number; // response headers received (server think time ends here)
+  doneAt: number; // body fully downloaded
+  bytes: number;
+}
+
 /** Returns MP3 audio for plain text, or SSML when `ssml` is true. */
-export async function synthesize(text: string, voiceId: string, o: Opts & { ssml?: boolean }): Promise<Blob> {
+export async function synthesize(text: string, voiceId: string, o: Opts & { ssml?: boolean; onTiming?: (t: SynthTiming) => void }): Promise<Blob> {
+  const startedAt = performance.now();
   const body = { voiceId, [o.ssml ? 'ssml' : 'text']: text };
   const res = await call(
     SPEECH_PATH,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     o,
   );
+  const firstByteAt = performance.now();
   const blob = await res.blob();
+  o.onTiming?.({ startedAt, firstByteAt, doneAt: performance.now(), bytes: blob.size });
   if (blob.size === 0) throw new AiError('Lazybird returned no audio', 'empty');
   return blob;
 }

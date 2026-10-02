@@ -17,6 +17,7 @@ export interface Settings {
   textSize: TextSize;
   highContrast: boolean;
   sound: boolean; // audio cues (vibration is separate and always on where supported)
+  showTiming: boolean; // latency panel on the game screen
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   textSize: 'M',
   highContrast: false,
   sound: true,
+  showTiming: true,
 };
 
 const KEY = 'tap.settings.v1';

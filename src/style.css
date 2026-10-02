@@ -76,3 +76,22 @@ label:has(> input[type='checkbox']) { flex-wrap: nowrap; align-items: flex-start
 label:has(> input[type='checkbox']) input { flex: none; margin-top: .25rem; }
 #nav small { font-size: .72rem; }
 #nav button { min-width: 0; }
+
+/* Latency panel */
+.timing { border: 2px dashed var(--line); border-radius: var(--radius); padding: 10px 12px; font-size: .9rem; }
+.timing summary { cursor: pointer; font-weight: 700; }
+.timing-body { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.timing-body p { margin: 0; }
+.bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bars li { display: grid; grid-template-columns: 9.5rem 1fr 5.5rem; align-items: center; gap: 8px; }
+.bar-track { background: var(--line); border-radius: 6px; height: .7rem; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.bars .slowest .bar-fill { background: var(--err); }
+.bars .slowest .bar-label, .bars .slowest .bar-ms { font-weight: 700; }
+.bar-ms { text-align: right; font-variant-numeric: tabular-nums; }
+.timing-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.timing-table th, .timing-table td { text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.timing-table th:first-child, .timing-table td:first-child { text-align: left; }
+.timing textarea { width: 100%; font: .75rem monospace; background: var(--panel); color: inherit; border: 2px solid var(--line); border-radius: 8px; }
+.timing-table td, .timing-table th { white-space: nowrap; }
+.timing-table td:first-child { white-space: normal; }

@@ -3,10 +3,11 @@ import { currentPlayer } from '../engine/turns';
 import { chat, type ChatOptions } from './openrouter';
 import type { Moment } from './lines';
 import type { Settings } from '../settings';
+import type { TraceRef } from '../perf';
 
 export interface CommentatorDeps {
   settings: () => Settings;
-  speak: (text: string, opts?: { ssml?: boolean; plain?: string }) => void;
+  speak: (text: string, opts?: { ssml?: boolean; plain?: string; trace?: TraceRef }) => void;
   pick: (moment: Moment, vars: Record<string, string>) => string;
   caption: (text: string) => void;
   notice?: (msg: string) => void;
@@ -41,7 +42,7 @@ export class Commentator {
   private liveUsed = 0;
   constructor(private deps: CommentatorDeps) {}
 
-  onResult(prev: GameState, action: Action, result: ActionResult): void {
+  onResult(prev: GameState, action: Action, result: ActionResult, trace?: TraceRef): void {
     const s = this.deps.settings();
     if (s.commentary === 'off') return;
     const moment = momentFor(prev, action, result);
@@ -58,14 +59,18 @@ export class Commentator {
     const turnLine = finished || moment === 'win' ? '' : this.deps.pick('turn', vars);
     const emit = (line: string) => {
       const text = turnLine ? `${line} ${turnLine}` : line;
+      trace?.markOnce('textReady');
+      trace?.meta('moment', moment);
       this.deps.caption(text);
+      trace?.markOnce('captionShown');
       if (DRAMATIC.includes(moment)) {
-        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/>${esc(turnLine)}</speak>`, { ssml: true, plain: text });
-      } else this.deps.speak(text);
+        this.deps.speak(`<speak>${esc(line)}<break time="400ms"/>${esc(turnLine)}</speak>`, { ssml: true, plain: text, trace });
+      } else this.deps.speak(text, { trace });
     };
 
     if (s.commentary === 'live' && s.openrouterKey && LIVE_MOMENTS.includes(moment) && this.liveUsed < s.liveCap) {
       this.liveUsed++;
+      trace?.meta('liveAI', true);
       const context = `${name} played ${cardName(top)}. Cards left: ${st.players.map((p) => `${p.name} ${st.public.handCounts[p.id]}`).join(', ')}.${moment === 'win' ? ` ${name} just won the game.` : ''}`;
       (this.deps.chatImpl ?? chat)({
         apiKey: s.openrouterKey,
@@ -73,6 +78,7 @@ export class Commentator {
         messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: context }],
         maxTokens: 60,
         timeoutMs: 4000,
+        onTiming: (t) => trace?.meta('liveAIMs', t.ms),
       })
         .then((line) => emit(line.replace(/^["']|["']$/g, '').slice(0, 200)))
         .catch((err: Error) => {

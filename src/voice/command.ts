@@ -78,6 +78,8 @@ export interface ResolveOptions {
   apiKey?: string;
   model?: string;
   chatImpl?: (o: ChatOptions) => Promise<string>;
+  /** Called with the model round trip when the OpenRouter fallback was needed. */
+  onFallbackTiming?: (ms: number) => void;
 }
 
 /** Local grammar first; the cheap model only as a fallback for odd phrasing. */
@@ -85,6 +87,7 @@ export async function resolveCommand(text: string, o: ResolveOptions = {}): Prom
   const local = parseCommand(text);
   if (local.type !== 'unknown' || !o.apiKey || !o.model) return local;
   if (words(text).length > MAX_WORDS) return local;
+  const started = performance.now();
   try {
     const reply = await (o.chatImpl ?? chat)({
       apiKey: o.apiKey,
@@ -101,5 +104,7 @@ export async function resolveCommand(text: string, o: ResolveOptions = {}): Prom
     return LABELS[word] ?? { type: 'unknown' };
   } catch {
     return { type: 'unknown' };
+  } finally {
+    o.onFallbackTiming?.(Math.round(performance.now() - started));
   }
 }

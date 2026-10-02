@@ -21,6 +21,8 @@ export interface ChatOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Reports the round trip (non-streaming, so first byte ~ total). Observation only. */
+  onTiming?: (t: { ms: number; ok: boolean }) => void;
 }
 
 export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -29,6 +31,8 @@ export const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 export async function chat(opts: ChatOptions): Promise<string> {
   if (!opts.apiKey) throw new AiError('No OpenRouter key set', 'auth');
   const ctl = new AbortController();
+  const started = performance.now();
+  let ok = false;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -58,6 +62,7 @@ export async function chat(opts: ChatOptions): Promise<string> {
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     const text = data.choices?.[0]?.message?.content?.trim();
     if (!text) throw new AiError('OpenRouter returned no text', 'empty');
+    ok = true;
     return text;
   } catch (err) {
     if (err instanceof AiError) throw err;
@@ -66,6 +71,7 @@ export async function chat(opts: ChatOptions): Promise<string> {
     throw new AiError(`Network error: ${(err as Error).message}`, 'network');
   } finally {
     clearTimeout(timer);
+    opts.onTiming?.({ ms: Math.round(performance.now() - started), ok });
   }
 }
 

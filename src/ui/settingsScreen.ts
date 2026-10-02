@@ -38,6 +38,7 @@ export function settingsScreen(onBack: () => void): void {
         })()),
         h('label', {}, h('input', { type: 'checkbox', checked: s.highContrast, onchange: (e: Event) => { s.highContrast = (e.target as HTMLInputElement).checked; applyDisplay(s); } }), ' High contrast'),
         h('label', {}, h('input', { type: 'checkbox', checked: s.sound, onchange: (e: Event) => (s.sound = (e.target as HTMLInputElement).checked) }), ' Sound effects (vibration stays on where supported)'),
+        h('label', {}, h('input', { type: 'checkbox', checked: s.showTiming, onchange: (e: Event) => (s.showTiming = (e.target as HTMLInputElement).checked) }), ' Show voice timing panel in games'),
         h('button', { onclick: () => { setOnboarded(false); status = 'The tutorial will show at the start of your next Match Up game.'; render(); } }, 'Replay tutorial'),
       ),
       h('fieldset', {}, h('legend', {}, 'OpenRouter (commentary)'),

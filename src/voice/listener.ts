@@ -9,6 +9,9 @@ export interface RecognitionLike {
   onresult: ((e: RecEvent) => void) | null;
   onend: (() => void) | null;
   onerror: ((e: { error: string }) => void) | null;
+  onaudiostart?: (() => void) | null;
+  onspeechstart?: (() => void) | null;
+  onspeechend?: (() => void) | null;
   start(): void;
   stop(): void;
 }
@@ -22,6 +25,8 @@ export interface ListenerOptions {
   onError?: (message: string) => void;
   /** Called when listening starts or stops (drives the "Listening…" indicator). */
   onListening?: (on: boolean) => void;
+  /** Raw recognizer milestones, for latency tracing. Observation only. */
+  onTiming?: (event: 'audioStart' | 'speechStart' | 'speechEnd') => void;
   /** Called once when repeated failures make the listener stop trying. */
   onGiveUp?: () => void;
   factory?: () => RecognitionLike;
@@ -110,6 +115,9 @@ export class VoiceListener {
       this.failures++;
       this.o.onError?.(`Microphone: ${e.error}`);
     };
+    rec.onaudiostart = () => this.o.onTiming?.('audioStart');
+    rec.onspeechstart = () => this.o.onTiming?.('speechStart');
+    rec.onspeechend = () => this.o.onTiming?.('speechEnd');
     rec.onend = () => this.onEnd(rec);
     this.rec = rec;
     this.startedAt = (this.o.now ?? Date.now)();
