@@ -4,6 +4,7 @@ import { STANDARD_DECK } from '../engine/deck';
 import { ALL_CARD_IDS, deckForCount, deckFromExcluded, describeDeck, excludedFromDeck } from '../engine/deckConfig';
 import type { Cartridge, Player, TableConfig } from '../engine/types';
 import { WebNfcInput } from '../input/webnfc';
+import { loadChipMap } from '../storage';
 
 export interface GameStart {
   players: Player[];
@@ -23,15 +24,17 @@ const SHAPES = ['circle', 'triangle', 'square', 'star'] as const;
 export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, onBack: () => void): void {
   const p = game.players;
   const [min, max] = p.kind === 'fixed' ? [p.count, p.count] : [p.min, p.max];
-  let n = Math.min(4, max);
-  let useNfc = false;
   const names = loadNames();
   const saved = loadDealSetup();
+  let n = Math.max(min, Math.min(saved.players, max));
   let deal: DealChoice = saved.deal;
   let deck = deckFromExcluded(saved.excluded);
   const nfcOk = WebNfcInput.isSupported();
-
-  const persist = () => saveDealSetup({ deal, excluded: excludedFromDeck(deck) });
+  const tagged = new Set(Object.values(loadChipMap()));
+  // Never chosen before: default on only when this phone can read tags and some are registered.
+  let nfcChoice: boolean | undefined = saved.nfc;
+  const wantNfc = () => nfcChoice ?? (nfcOk && tagged.size > 0);
+  const persist = () => saveDealSetup({ deal, excluded: excludedFromDeck(deck), players: n, ...(nfcChoice === undefined ? {} : { nfc: nfcChoice }) });
 
   // The deck controls update in place. Rebuilding the page when the number box loses focus would swallow
   // the tap that caused the blur (e.g. on Start), so only structural changes (players, dealing) re-render.
@@ -39,6 +42,7 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
   let summaryEl: HTMLElement;
   let planEl: HTMLElement;
   let startBtn: HTMLButtonElement;
+  let hintEl: HTMLElement | undefined;
   let cardBtns: HTMLButtonElement[] = [];
   function updateDeckViews(): void {
     const plan = game.planDeal(n, deck.length);
@@ -47,12 +51,17 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
     planEl.className = 'error' in plan ? 'err' : 'ok';
     planEl.textContent = 'error' in plan ? plan.error : `${n} players: deal ${plan.handSize} cards each, leaving ${plan.pile} in the draw pile.`;
     startBtn.disabled = 'error' in plan;
+    if (hintEl) {
+      const have = deck.filter((id) => tagged.has(id)).length;
+      hintEl.className = have < deck.length ? 'warn' : 'ok';
+      hintEl.textContent = `${have} of ${deck.length} cards in play have tags registered`;
+    }
     for (const b of cardBtns) b.setAttribute('aria-pressed', String(deck.includes(b.dataset.card as string)));
   }
 
   function render(): void {
     const plan = game.planDeal(n, deck.length);
-    const count = h('select', { id: 'count', onchange: (e: Event) => { n = Number((e.target as HTMLSelectElement).value); render(); } },
+    const count = h('select', { id: 'count', onchange: (e: Event) => { n = Number((e.target as HTMLSelectElement).value); persist(); render(); } },
       ...Array.from({ length: max - min + 1 }, (_, i) => h('option', { value: min + i }, String(min + i)))) as HTMLSelectElement;
     count.value = String(n);
 
@@ -102,8 +111,9 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
           h('button', { class: 'link', onclick: () => { deck = [...ALL_CARD_IDS]; persist(); updateDeckViews(); } }, 'Reset to all 52')),
       ),
 
-      h('label', {}, h('input', { type: 'checkbox', id: 'nfc', checked: useNfc, disabled: !nfcOk, onchange: (e: Event) => { useNfc = (e.target as HTMLInputElement).checked; } }),
+      h('label', {}, h('input', { type: 'checkbox', id: 'nfc', checked: nfcOk && wantNfc(), disabled: !nfcOk, onchange: (e: Event) => { nfcChoice = (e.target as HTMLInputElement).checked; persist(); } }),
         ' Use real NFC taps ', h('small', {}, nfcOk ? '(uses registered tags)' : '(needs Chrome on Android; using simulated taps)')),
+      nfcOk && (hintEl = h('small', { id: 'nfc-hint' })),
       (startBtn = h('button', { class: 'primary', id: 'start', disabled: 'error' in plan, onclick: () => {
         const plan = game.planDeal(n, deck.length);
         if ('error' in plan) return;
@@ -112,12 +122,13 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
         persist();
         onStart({
           players: clean.map((name, i) => ({ id: `p${i}`, name })),
-          realNfc: useNfc,
+          realNfc: nfcOk && wantNfc(),
           table: { mode: deal === 'app' ? 'virtual' : 'physical', knowledge: deal === 'scanned' ? 'scanned' : 'counts', deck: [...deck], handSize: plan.handSize },
         });
       } }, 'Start')),
       h('button', { class: 'link', onclick: onBack }, 'Back'),
     );
+    updateDeckViews();
   }
   render();
 }

@@ -13,6 +13,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
 | Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
+| Setup remembers your choices: player count, "Use real NFC taps" (defaults on when the phone supports it and tags are registered), dealing, deck | Built and tested, with a "N of M cards have tags" hint. |
 | Real-card table model: count-only and scan-hands dealing, any number of cards in play | Built and tested: counts match real hands through whole simulated games (3,000+ moves, many deck sizes). **Not yet tried with real NFC cards** |
 | Voice speed: hybrid voice, pipelined + cached Lazybird, heard-text, wake-word timing | Built; verified in a browser against a mocked 4s Lazybird (answers audible in ~440ms, repeats from cache in ~470ms). **Real-phone gain, iOS behavior and voice quality still to confirm** |
 | Brief UX decisions (names, pause/resume, sound/haptics, accessibility, nav, onboarding, accents, game-night tally) | Done |
@@ -153,6 +154,9 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-04 (setup remembers choices)
+- **Setup:** the player count and the "Use real NFC taps" checkbox are now remembered between games. First time, NFC defaults on only if the phone supports Web NFC and at least one tag is registered; an explicit choice always wins, and an unsupported browser shows it disabled without losing the saved choice. A hint under the checkbox says how many cards in play have tags registered. 241 unit tests; browser-tested with a stubbed `NDEFReader`.
 
 ### 2026-10-04 (real cards + deck size)
 - **Table model:** you can now play with real cards. Setup offers *Real cards, count only* (default), *Real cards, scan hands* and *The app deals*. The app tracks hand counts and the discard pile from taps, derives the draw pile, asks the table to confirm a win, scores leftover cards, and has Undo and a count-correction control. Scan mode adds card identities (it can refuse a card that isn't yours). A hand is now "identified cards + a count of unidentified ones", used by every mode.

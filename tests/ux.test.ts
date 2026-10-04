@@ -183,12 +183,27 @@ describe('saved games carry the table; deal setup is remembered', () => {
   });
   it('deal setup defaults to count-only with every card, and ignores junk', () => {
     const store = memStore();
-    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [] });
-    saveDealSetup({ deal: 'scanned', excluded: ['star-7'] }, store);
-    expect(loadDealSetup(store)).toEqual({ deal: 'scanned', excluded: ['star-7'] });
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [], players: 4 });
+    saveDealSetup({ deal: 'scanned', excluded: ['star-7'], players: 4 }, store);
+    expect(loadDealSetup(store)).toEqual({ deal: 'scanned', excluded: ['star-7'], players: 4 });
     store.setItem('tap.dealSetup.v1', JSON.stringify({ deal: 'banana', excluded: [1, 'x', null] }));
-    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: ['x'] });
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: ['x'], players: 4 });
     store.setItem('tap.dealSetup.v1', '{broken');
-    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [] });
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [], players: 4 });
+  });
+  it('remembers player count and the NFC choice; absent nfc stays absent', () => {
+    const store = memStore();
+    expect(loadDealSetup(store).players).toBe(4);
+    expect('nfc' in loadDealSetup(store)).toBe(false);
+    saveDealSetup({ deal: 'app', excluded: [], players: 6, nfc: true }, store);
+    expect(loadDealSetup(store)).toEqual({ deal: 'app', excluded: [], players: 6, nfc: true });
+    saveDealSetup({ deal: 'app', excluded: [], players: 3, nfc: false }, store);
+    expect(loadDealSetup(store).nfc).toBe(false);
+    for (const bad of [0, -2, 2.5, '5', null, 1000]) {
+      store.setItem('tap.dealSetup.v1', JSON.stringify({ players: bad, nfc: 'yes' }));
+      const d = loadDealSetup(store);
+      expect(d.players).toBe(4);
+      expect('nfc' in d).toBe(false);
+    }
   });
 });

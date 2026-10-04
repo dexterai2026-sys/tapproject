@@ -128,6 +128,8 @@ export type DealChoice = 'counts' | 'scanned' | 'app';
 export interface DealSetup {
   deal: DealChoice;
   excluded: string[]; // card ids taken out of play
+  players: number; // last player count (the setup screen clamps it to the game's range)
+  nfc?: boolean; // the "Use real NFC taps" choice; absent = never chosen
 }
 
 const DEAL_KEY = 'tap.dealSetup.v1';
@@ -135,7 +137,10 @@ const DEAL_KEY = 'tap.dealSetup.v1';
 export function loadDealSetup(store: Store | null = defaultStore()): DealSetup {
   const d = read<Partial<DealSetup>>(DEAL_KEY, store);
   const deal: DealChoice = d?.deal === 'scanned' || d?.deal === 'app' ? d.deal : 'counts';
-  return { deal, excluded: Array.isArray(d?.excluded) ? d.excluded.filter((x): x is string => typeof x === 'string') : [] };
+  const players = typeof d?.players === 'number' && Number.isInteger(d.players) && d.players >= 1 && d.players <= 100 ? d.players : 4;
+  const out: DealSetup = { deal, excluded: Array.isArray(d?.excluded) ? d.excluded.filter((x): x is string => typeof x === 'string') : [], players };
+  if (typeof d?.nfc === 'boolean') out.nfc = d.nfc;
+  return out;
 }
 
 export function saveDealSetup(d: DealSetup, store: Store | null = defaultStore()): void {
