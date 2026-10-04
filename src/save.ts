@@ -129,6 +129,7 @@ export interface DealSetup {
   deal: DealChoice;
   excluded: string[]; // card ids taken out of play
   players: number; // last player count (the setup screen clamps it to the game's range)
+  playOn?: boolean; // 3+ players: play on until one player is left holding cards
   nfc?: boolean; // the "Use real NFC taps" choice; absent = never chosen
 }
 
@@ -140,6 +141,7 @@ export function loadDealSetup(store: Store | null = defaultStore()): DealSetup {
   const players = typeof d?.players === 'number' && Number.isInteger(d.players) && d.players >= 1 && d.players <= 100 ? d.players : 4;
   const out: DealSetup = { deal, excluded: Array.isArray(d?.excluded) ? d.excluded.filter((x): x is string => typeof x === 'string') : [], players };
   if (typeof d?.nfc === 'boolean') out.nfc = d.nfc;
+  if (d?.playOn === true) out.playOn = true;
   return out;
 }
 

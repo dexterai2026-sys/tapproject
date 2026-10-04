@@ -1,5 +1,5 @@
 import type { Action, ActionResult, Cartridge, Card, GameState, GameStatus, Player, PlayerId, Rng, TableConfig } from '../engine/types';
-import { cardById, shuffle } from '../engine/deck';
+import { cardById, mulberry32, shuffle } from '../engine/deck';
 import { ALL_CARD_IDS } from '../engine/deckConfig';
 import { advance, createTurn, currentPlayer, reverse, skip } from '../engine/turns';
 import { deckCards, deckHas, defaultTable, fullyKnown, handCount, inDiscard, knownOwner, knownPoints, outOfDeckMessage, physicalDraw, scanInto, syncCounts, unknownOf } from '../engine/table';
@@ -27,9 +27,15 @@ export function planDeal(playerCount: number, deckSize: number): { handSize: num
   return { handSize, pile: deckSize - playerCount * handSize - 1 }; // minus the card flipped to start the pile
 }
 
+/** Numbers score face value; Skip, Reverse and +2 are worth 20. */
+export const SPECIAL_POINTS = 20;
 export function cardPoints(card: Card): number {
-  return Math.min(card.number, 10);
+  return card.number > 10 ? SPECIAL_POINTS : card.number;
 }
+
+const ordinal = (n: number): string => (['1st', '2nd', '3rd'][n - 1] ?? `${n}th`);
+/** Play-on mode (last player holding cards loses) only makes sense with three or more seats. */
+const playsOn = (s: GameState): boolean => !!s.table.playOn && s.players.length >= 3;
 
 export function isPlayable(card: Card, top: Card, pendingDraw: number): boolean {
   if (pendingDraw > 0) return card.number === DRAW_TWO; // only a stack can answer a stack
@@ -96,6 +102,7 @@ function setup(players: Player[], rng: Rng, requested?: TableConfig): GameState 
   const wanted = requested?.handSize ?? plan.handSize;
   const handSize = wanted >= 1 && wanted * players.length + 2 <= deckIds.length ? wanted : plan.handSize;
   const table: TableConfig = requested ? { ...requested, handSize } : defaultTable(handSize);
+  if (table.playOn && players.length < 3) delete table.playOn;
 
   if (table.mode === 'physical') {
     const state: GameState = {
@@ -264,23 +271,63 @@ function doConfirm(s: GameState, ok: boolean): ActionResult {
     logLine(s, `${who} still has a card: count corrected.`);
     return { ok: true, state: s, message: `${who} still has a card. Count corrected.` };
   }
+  if (playsOn(s)) {
+    pub.pendingWin = null;
+    pub.status = 'playing';
+    return goOut(s, w);
+  }
+  return finishRound(s, w);
+}
+
+/** The round is over: the winner scores what is left in the other hands (real cards: the table may need to tap some). */
+function finishRound(s: GameState, w: PlayerId): ActionResult {
+  const pub = s.public;
+  const who = name(s, w);
+  // The usual rule: a winning +2 still makes the next player draw before the points are counted.
+  if (pub.pendingDraw > 0) {
+    const next = currentPlayer(pub.turn);
+    if (next !== w) {
+      const owed = pub.pendingDraw;
+      const { drawn } = isPhysical(s) ? physicalDraw(s, next, owed) : { drawn: drawCards(s, next, owed, mulberry32(owed)) };
+      logLine(s, `${name(s, next)} draws ${drawn} before the points are counted.`);
+    }
+    pub.pendingDraw = 0;
+  }
   const others = s.players.filter((p) => p.id !== w).map((p) => p.id);
   const kp = knownPoints(s, others, cardPoints);
   pub.scores[w] = (pub.scores[w] ?? 0) + kp.total;
   pub.scoredCards = kp.ids;
   pub.winner = w;
   pub.pendingWin = null;
+  pub.lastCardPending = null;
+  if (playsOn(s)) pub.loser = pub.turn.order[0] ?? null;
+  const loserNote = pub.loser ? ` ${name(s, pub.loser)} is the last one holding cards.` : '';
   const unidentified = others.some((id) => unknownOf(s.private[id]) > 0);
   if (unidentified && s.table.mode === 'physical') {
     pub.status = 'scoring';
-    logLine(s, `${who} is out! Tap the cards left in the other hands to score, or finish.`);
+    logLine(s, `${who} is out!${loserNote} Tap the cards left in the other hands to score, or finish.`);
     syncCounts(s);
-    return { ok: true, state: s, message: `${who} is out! Tap the cards left in the other hands to score, or finish.` };
+    return { ok: true, state: s, message: `${who} is out!${loserNote} Tap the cards left in the other hands to score, or finish.` };
   }
   pub.status = 'finished';
-  logLine(s, `${who} wins and scores ${pub.scores[w]}!`);
+  logLine(s, `${who} wins and scores ${pub.scores[w]}!${loserNote}`);
   syncCounts(s);
-  return { ok: true, state: s, message: `${who} wins!` };
+  return { ok: true, state: s, message: pub.loser ? `${who} wins!${loserNote}` : `${who} wins!` };
+}
+
+/** Play-on mode: a player is out. They leave the turn order; when one player is left, that player loses and the round ends. */
+function goOut(s: GameState, player: PlayerId): ActionResult {
+  const pub = s.public;
+  const place = (pub.placings ?? []).length + 1;
+  pub.placings = [...(pub.placings ?? []), player];
+  const next = currentPlayer(pub.turn);
+  const order = pub.turn.order.filter((id) => id !== player);
+  pub.turn = { ...pub.turn, order, index: Math.max(0, order.indexOf(next)) };
+  pub.lastCardPending = null;
+  logLine(s, `${name(s, player)} is out (${ordinal(place)}).`);
+  syncCounts(s);
+  if (order.length <= 1) return finishRound(s, (pub.placings as PlayerId[])[0] as PlayerId);
+  return { ok: true, state: s, message: `${name(s, player)} is out in ${ordinal(place)} place. Play on!` };
 }
 
 function doScore(prev: GameState, s: GameState, cardId: string): ActionResult {
@@ -384,7 +431,15 @@ function doPlay(prev: GameState, s: GameState, player: PlayerId, cardId: string,
   logLine(s, `${who} plays ${card.id}.`);
 
   const left = handCount(s, player);
-  if (left === 0 && !isPhysical(s)) {
+  if (left === 0 && !isPhysical(s) && !playsOn(s)) {
+    if (card.number === DRAW_TWO) {
+      // A winning +2 still makes the next player draw before the points are counted.
+      const next = currentPlayer(advance(pub.turn));
+      const owed = pub.pendingDraw + 2;
+      const got = drawCards(s, next, owed, rng);
+      pub.pendingDraw = 0;
+      logLine(s, `${name(s, next)} draws ${got} before the points are counted.`);
+    }
     const total = s.players.filter((p) => p.id !== player).reduce((sum, p) => sum + (s.private[p.id]?.hand ?? []).reduce((a, c) => a + cardPoints(c), 0), 0);
     pub.status = 'finished';
     pub.winner = player;
@@ -401,7 +456,7 @@ function doPlay(prev: GameState, s: GameState, player: PlayerId, cardId: string,
   } else if (card.number === REVERSE) {
     pub.turn = reverse(pub.turn);
     // With two players a reverse hands the turn straight back.
-    if (s.players.length > 2) pub.turn = advance(pub.turn);
+    if (pub.turn.order.length > 2) pub.turn = advance(pub.turn);
     logLine(s, 'Direction reversed.');
   } else if (card.number === DRAW_TWO) {
     pub.pendingDraw += 2;
@@ -411,6 +466,7 @@ function doPlay(prev: GameState, s: GameState, player: PlayerId, cardId: string,
     pub.turn = advance(pub.turn);
   }
 
+  if (left === 0 && !isPhysical(s)) return goOut(s, player); // app-dealt, play-on mode
   if (left === 0) {
     // Real cards: the app only counts, so the table confirms before anyone is declared the winner.
     pub.status = 'confirming';

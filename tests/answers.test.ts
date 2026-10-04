@@ -39,7 +39,7 @@ describe('answerQuery', () => {
   it('score after a win reports the winner and points; turn says who won', () => {
     const w = game([['star-9'], ['circle-8', 'circle-13'], ['star-1']]);
     const done = applyAction(matchingGame, w, { type: 'play', player: 'p0', cardId: 'star-9' }, rng).state;
-    expect(ask('score', done)).toBe('Sam won and scored 19.');
+    expect(ask('score', done)).toBe('Sam won and scored 29.');
     expect(ask('turn', done)).toBe('Sam won this game.');
   });
   it('repeat returns the last spoken line, or a fallback', () => {

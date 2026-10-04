@@ -37,6 +37,7 @@ export interface TableConfig {
   knowledge: Knowledge;
   deck: string[]; // ids of the cards in play (a subset of the 52 the customer owns)
   handSize: number;
+  playOn?: boolean; // 3+ players: keep playing after someone is out; the last player holding cards loses
 }
 
 export type GameStatus =
@@ -54,6 +55,8 @@ export interface PublicState {
   scanning: { player: PlayerId; remaining: number } | null;
   pendingWin: PlayerId | null;
   scoredCards: string[]; // leftover cards already counted this round
+  placings?: PlayerId[]; // play-on mode: who has gone out, in order
+  loser?: PlayerId | null; // play-on mode: the last player still holding cards
   reshuffles?: number; // how many times the discard pile has been restocked into the draw pile (absent in older saves)
   turn: TurnState;
   discard: Card[]; // last element is the top card

@@ -13,7 +13,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
 | Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
-| Mic closes while the app speaks (fixes audio cut-outs); draw pile empty/restock prompts for real cards | Built and tested with a fake recognizer and 10-card simulated games. **Not yet confirmed on a real phone** |
+| Scoring: specials 20, winning +2 is drawn first; optional play-on mode (last holding cards loses, 3+ players) | Built and tested, including simulated whole games |\n| Mic closes while the app speaks (fixes audio cut-outs); draw pile empty/restock prompts for real cards | Built and tested with a fake recognizer and 10-card simulated games. **Not yet confirmed on a real phone** |
 | Setup remembers your choices: player count, "Use real NFC taps" (defaults on when the phone supports it and tags are registered), dealing, deck | Built and tested, with a "N of M cards have tags" hint. |
 | Real-card table model: count-only and scan-hands dealing, any number of cards in play | Built and tested: counts match real hands through whole simulated games (3,000+ moves, many deck sizes). **Not yet tried with real NFC cards** |
 | Voice speed: hybrid voice, pipelined + cached Lazybird, heard-text, wake-word timing | Built; verified in a browser against a mocked 4s Lazybird (answers audible in ~440ms, repeats from cache in ~470ms). **Real-phone gain, iOS behavior and voice quality still to confirm** |
@@ -117,7 +117,7 @@ The app can deal for you (a screen-only game, also handy for testing), or **you 
 How it behaves with real cards:
 - **The draw pile is derived**, not seen: cards in play, minus hands, minus the discard pile. When it runs short the app tells you to reshuffle the discard pile (keeping the top card).
 - **Last card and winning come from the counts.** When someone's count reaches zero the table is asked to **confirm** they're out (or say they still have a card), because a missed *Draw* can make a count drift.
-- **Scoring:** after a confirmed win, tap the cards still in the other hands to score them, or finish. In scan mode cards the app already identified are scored automatically.
+- **Scoring:** numbers are face value, Skip/Reverse/+2 are 20. After a confirmed win, tap the cards still in the other hands to score them, or finish. In scan mode cards the app already identified are scored automatically.
 - **Mistakes:** *Undo last move* (or say "undo"), and *Fix a card count* for a forgotten *Draw*.
 - **Cards in play is open-ended.** Type any number up to 52 (the highest numbers are dropped first, so 40 is numbers 1-10 in every shape), or choose the exact cards, for example when one has gone missing. The setup screen shows how the deal works out (cards each, cards left in the pile) and refuses a table that can't work. Your choice is remembered.
 - **Without NFC** the simulator plays the people holding the cards: it deals real hands that the app never sees, so it is a fair test of the physical flow.
@@ -155,6 +155,10 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-05 (scoring review, play-on mode)
+- **Scoring:** reviewed against the rules. Fixed: Skip, Reverse and +2 now score **20** each (were 10); numbers stay face value. A winning **+2** now makes the next player draw two before the points are counted (app-dealt: at once; real cards: when the table confirms the win). A Reverse with only two players left now correctly hands the turn back (it used the seat count, not who is still in).
+- **Play on (last one holding cards loses):** new optional switch in Setup for 3+ players (off by default; remembered). When on, a player who goes out leaves the turn order and is placed 1st, 2nd, ...; the others keep playing (a +2 played to go out stays owed and can be stacked). When one player is left they lose and the round ends: the **first player out wins** and scores that last hand (real cards: tap its unidentified cards as usual). The screen shows who is out and who was left holding cards. With 2 players the switch does nothing. Game-night tally still counts the first-out winner. Simulated whole games (counts and scanned, 3 to 6 players) always end with a named loser and counts matching real cards.
 
 ### 2026-10-04 (audio cut-outs, draw pile restock)
 - **Audio:** in wake-word mode the mic stayed open while the app spoke (only the transcripts were dropped), which on phones switches to call-style audio and cuts playback. The listener now really closes the mic while the app talks and reopens it ~350ms after, without counting that as a failure. Push-to-talk is unchanged. **Needs a real-phone check.** If it still clips, use push-to-talk.

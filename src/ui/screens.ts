@@ -492,7 +492,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
     const physical = state.table.mode === 'physical';
     const simHand: Card[] = simTable ? (simTable.hands[cur] ?? []) : (state.private[cur]?.hand ?? []);
     const heading =
-      pub.status === 'finished' ? `${nameOf(pub.winner as string)} wins!`
+      pub.status === 'finished' ? `${nameOf(pub.winner as string)} wins!${pub.loser ? ` ${nameOf(pub.loser)} is left holding cards.` : ''}`
       : pub.status === 'setup' ? 'Setting up the table'
       : pub.status === 'scanning' ? `${nameOf(pub.scanning?.player ?? '')}: tap your drawn cards`
       : pub.status === 'confirming' ? `Is ${nameOf(pub.pendingWin ?? '')} out?`
@@ -508,7 +508,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
         pub.lastCardPending && h('p', { class: 'warn' }, `${nameOf(pub.lastCardPending)} is on one card — call it (L)!`),
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
         leftOut && h('button', { id: 'add-card', onclick: () => { const id = leftOut as string; act({ type: 'addCard', cardId: id }); } }, `Add ${leftOut} to the deck`),
-        h('ul', { class: 'scores' }, players.map((p) => h('li', {}, `${p.name}: ${pub.handCounts[p.id]} cards · ${pub.scores[p.id]} pts`))),
+        h('ul', { class: 'scores' }, players.map((p) => { const place = (pub.placings ?? []).indexOf(p.id) + 1; return h('li', {}, `${p.name}: ${place ? `out (${['1st', '2nd', '3rd'][place - 1] ?? `${place}th`})` : `${pub.handCounts[p.id]} cards`} · ${pub.scores[p.id]} pts${pub.loser === p.id ? ' · last holding cards' : ''}`); })),
         h('small', {}, `Draw pile: ${pub.drawPileCount}${physical ? ' (counted from your taps)' : ''}${pub.reshuffles ? ` · restocked ${pub.reshuffles}×` : ''}`),
         restockDue(state) && h('p', { id: 'restock', class: 'warn', role: 'status' }, RESTOCK_TEXT),
         pub.status === 'finished' && tallyList(),

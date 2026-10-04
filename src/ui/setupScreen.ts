@@ -29,12 +29,13 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
   let n = Math.max(min, Math.min(saved.players, max));
   let deal: DealChoice = saved.deal;
   let deck = deckFromExcluded(saved.excluded);
+  let playOn = saved.playOn === true;
   const nfcOk = WebNfcInput.isSupported();
   const tagged = new Set(Object.values(loadChipMap()));
   // Never chosen before: default on only when this phone can read tags and some are registered.
   let nfcChoice: boolean | undefined = saved.nfc;
   const wantNfc = () => nfcChoice ?? (nfcOk && tagged.size > 0);
-  const persist = () => saveDealSetup({ deal, excluded: excludedFromDeck(deck), players: n, ...(nfcChoice === undefined ? {} : { nfc: nfcChoice }) });
+  const persist = () => saveDealSetup({ deal, excluded: excludedFromDeck(deck), players: n, ...(playOn ? { playOn } : {}), ...(nfcChoice === undefined ? {} : { nfc: nfcChoice }) });
 
   // The deck controls update in place. Rebuilding the page when the number box loses focus would swallow
   // the tap that caused the blur (e.g. on Start), so only structural changes (players, dealing) re-render.
@@ -72,6 +73,10 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
       h('div', { class: 'names' }, Array.from({ length: n }, (_, i) =>
         h('input', { id: `name-${i}`, placeholder: `Player ${i + 1}`, maxlength: 16, value: names[i] ?? '', 'aria-label': `Player ${i + 1} name`,
           oninput: (e: Event) => { names[i] = (e.target as HTMLInputElement).value; } }))),
+
+      n >= 3 && h('label', { class: 'choice' },
+        h('input', { type: 'checkbox', id: 'playon', checked: playOn, onchange: (e: Event) => { playOn = (e.target as HTMLInputElement).checked; persist(); } }),
+        h('span', {}, h('b', {}, 'Play on until one player is left'), h('small', {}, 'Players who go out sit down and the rest keep playing. The last one holding cards loses, and the first one out wins the points from that hand. Off: the first one out ends the round.'))),
 
       h('fieldset', {}, h('legend', {}, 'How are you dealing?'),
         DEAL_OPTIONS.map((o) =>
@@ -124,7 +129,7 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
         onStart({
           players: clean.map((name, i) => ({ id: `p${i}`, name })),
           realNfc: nfcOk && wantNfc(),
-          table: { mode: deal === 'app' ? 'virtual' : 'physical', knowledge: deal === 'scanned' ? 'scanned' : 'counts', deck: [...deck], handSize: plan.handSize },
+          table: { mode: deal === 'app' ? 'virtual' : 'physical', knowledge: deal === 'scanned' ? 'scanned' : 'counts', deck: [...deck], handSize: plan.handSize, ...(playOn && n >= 3 ? { playOn: true } : {}) },
         });
       } }, 'Start')),
       h('button', { class: 'link', onclick: onBack }, 'Back'),

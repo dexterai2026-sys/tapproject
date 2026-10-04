@@ -134,7 +134,7 @@ describe('last card + win', () => {
     const r = play(s, 'p0', 'star-9');
     expect(r.state.public.status).toBe('finished');
     expect(r.state.public.winner).toBe('p0');
-    expect(r.state.public.scores.p0).toBe(8 + 10);
+    expect(r.state.public.scores.p0).toBe(8 + 20);
     expect(play(r.state, 'p1', 'circle-8').ok).toBe(false);
   });
 });
@@ -174,5 +174,65 @@ describe('full simulated game', () => {
     expect(s.public.winner).not.toBeNull();
     const all = [...s.hidden.drawPile, ...s.public.discard, ...s.players.flatMap((p) => s.private[p.id]!.hand)];
     expect(new Set(all.map((c) => c.id)).size).toBe(52);
+  });
+});
+
+describe('scoring', () => {
+  it('numbers score face value; Skip, Reverse and +2 are worth 20', async () => {
+    const { cardPoints } = await import('../src/games/matching');
+    expect([1, 7, 10].map((n) => cardPoints({ id: 'x', number: n, suit: 'star' } as Card))).toEqual([1, 7, 10]);
+    expect([11, 12, 13].map((n) => cardPoints({ id: 'x', number: n, suit: 'star' } as Card))).toEqual([20, 20, 20]);
+  });
+  it('a winning +2 still makes the next player draw two, and those cards count', () => {
+    const s = scenario([['star-13'], ['circle-8'], ['star-1']], 'star-5', ['circle-4', 'circle-3']);
+    const r = play(s, 'p0', 'star-13');
+    expect(r.state.public.status).toBe('finished');
+    expect(r.state.private.p1!.hand).toHaveLength(3);
+    expect(r.state.public.pendingDraw).toBe(0);
+    expect(r.state.public.scores.p0).toBe(8 + 4 + 3 + 1);
+  });
+});
+
+describe('play on: the last player holding cards loses (3+ players)', () => {
+  const playOn = (hands: string[][], top = 'star-5') => {
+    const s = scenario(hands, top);
+    s.table = { ...s.table, playOn: true };
+    return s;
+  };
+  it('the first player out leaves the turn order and the game goes on', () => {
+    const s = playOn([['star-9'], ['circle-8', 'circle-2'], ['star-1', 'star-2']]);
+    const r = play(s, 'p0', 'star-9');
+    expect(r.ok).toBe(true);
+    expect(r.state.public.status).toBe('playing');
+    expect(r.state.public.placings).toEqual(['p0']);
+    expect(r.state.public.turn.order).toEqual(['p1', 'p2']);
+    expect(currentPlayer(r.state.public.turn)).toBe('p1');
+    expect(r.message).toMatch(/1st place/);
+  });
+  it('when one player is left they lose, the first one out wins, and the loser\'s hand is the score', () => {
+    let s = playOn([['star-9'], ['star-8'], ['circle-1', 'circle-13']]);
+    s = play(s, 'p0', 'star-9').state; // p0 out, p1 up
+    const r = play(s, 'p1', 'star-8');
+    expect(r.state.public.status).toBe('finished');
+    expect(r.state.public.placings).toEqual(['p0', 'p1']);
+    expect(r.state.public.winner).toBe('p0');
+    expect(r.state.public.loser).toBe('p2');
+    expect(r.state.public.scores.p0).toBe(1 + 20);
+    expect(r.message).toMatch(/P2 is the last one holding cards/);
+  });
+  it('a Reverse with two left hands the turn straight back, and a +2 out of the game stays owed', () => {
+    let s = playOn([['star-9'], ['star-12', 'circle-2'], ['star-1', 'star-2']]);
+    s = play(s, 'p0', 'star-9').state; // order p1, p2
+    const r = play(s, 'p1', 'star-12');
+    expect(currentPlayer(r.state.public.turn)).toBe('p1');
+    let t = playOn([['star-13'], ['circle-8', 'circle-2'], ['star-1', 'star-2']]);
+    t = play(t, 'p0', 'star-13').state;
+    expect(t.public.pendingDraw).toBe(2);
+    expect(currentPlayer(t.public.turn)).toBe('p1');
+  });
+  it('with two players the switch does nothing: first out still wins at once', () => {
+    const s = scenario([['star-9'], ['circle-8']]);
+    s.table = { ...s.table, playOn: true };
+    expect(play(s, 'p0', 'star-9').state.public.status).toBe('finished');
   });
 });

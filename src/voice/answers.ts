@@ -26,7 +26,7 @@ export function answerQuery(type: QueryType, ctx: AnswerContext): string {
       if (pub.status === 'scanning') return `${name(pub.scanning?.player ?? '')} is tapping the cards they drew.`;
       if (pub.status === 'confirming') return `Waiting to confirm that ${name(pub.pendingWin ?? '')} is out.`;
       if (pub.status === 'scoring') return `${name(pub.winner ?? '')} is out. Tap the leftover cards to score.`;
-      if (pub.status === 'finished') return `${name(pub.winner as string)} won this game.`;
+      if (pub.status === 'finished') return `${name(pub.winner as string)} won this game.${pub.loser ? ` ${name(pub.loser)} was left holding cards.` : ''}`;
       const extra = pub.pendingDraw ? ` They must play a plus two or draw ${pub.pendingDraw}.` : '';
       return `It's ${name(currentPlayer(pub.turn))}'s turn.${extra}`;
     }

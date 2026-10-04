@@ -191,6 +191,14 @@ describe('saved games carry the table; deal setup is remembered', () => {
     store.setItem('tap.dealSetup.v1', '{broken');
     expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [], players: 4 });
   });
+  it('remembers the play-on switch only when it is on', () => {
+    const store = memStore();
+    expect('playOn' in loadDealSetup(store)).toBe(false);
+    saveDealSetup({ deal: 'app', excluded: [], players: 4, playOn: true }, store);
+    expect(loadDealSetup(store).playOn).toBe(true);
+    store.setItem('tap.dealSetup.v1', JSON.stringify({ playOn: 'yes' }));
+    expect('playOn' in loadDealSetup(store)).toBe(false);
+  });
   it('remembers player count and the NFC choice; absent nfc stays absent', () => {
     const store = memStore();
     expect(loadDealSetup(store).players).toBe(4);

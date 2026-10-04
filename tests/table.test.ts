@@ -219,9 +219,9 @@ describe('physical table: counts only', () => {
     s = act(s, { type: 'confirm', ok: true }).state;
     expect(s.public.status).toBe('scoring');
     expect(s.public.winner).toBe('p0');
-    s = act(s, { type: 'score', cardId: 'circle-13' }).state; // worth 10
+    s = act(s, { type: 'score', cardId: 'circle-13' }).state; // worth 20
     s = act(s, { type: 'score', cardId: 'square-4' }).state;
-    expect(s.public.scores.p0).toBe(14);
+    expect(s.public.scores.p0).toBe(24);
     expect(act(s, { type: 'score', cardId: 'circle-13' }).message).toMatch(/already counted/);
     expect(act(s, { type: 'score', cardId: 'star-9' }).message).toMatch(/was played/);
     expect(act(s, { type: 'play', player: 'p1', cardId: 'star-1' }).message).toMatch(/Score the leftover/);
@@ -387,12 +387,12 @@ describe('physical table: scanned hands', () => {
 
 describe('simulated physical table vs the engine (ground truth)', () => {
   /** People with real cards play a full game through taps only; after every step the engine's counts must equal reality. */
-  function playOut(seed: number, nPlayers: number, deckSize: number, knowledge: Knowledge, calls = true, maxSteps = 4000): { finished: boolean; steps: number; penalties: number } {
+  function playOut(seed: number, nPlayers: number, deckSize: number, knowledge: Knowledge, calls = true, maxSteps = 4000, playOn = false): { finished: boolean; loser: string | null; steps: number; penalties: number } {
     const r = mulberry32(seed);
     const deck = deckForCount(deckSize);
     const plan = planDeal(nPlayers, deck.length) as { handSize: number; pile: number };
     const players = mk(nPlayers);
-    let s = startGame(matchingGame, players, r, table(deck, knowledge, 'physical', plan.handSize));
+    let s = startGame(matchingGame, players, r, { ...table(deck, knowledge, 'physical', plan.handSize), ...(playOn ? { playOn: true } : {}) });
     const sim = new SimTable(deck.map(card), players.map((p) => p.id), plan.handSize, r);
     const step = (a: Action): GameState => {
       const res = applyAction(matchingGame, s, a, r);
@@ -443,7 +443,7 @@ describe('simulated physical table vs the engine (ground truth)', () => {
       if (calls && s.public.lastCardPending) step({ type: 'callLast', player: s.public.lastCardPending });
       check();
     }
-    return { finished: s.public.status === 'finished', steps, penalties: s.public.log.filter((l) => /forgot to call last card/.test(l)).length };
+    return { finished: s.public.status === 'finished', loser: s.public.loser ?? null, steps, penalties: s.public.log.filter((l) => /forgot to call last card/.test(l)).length };
   }
 
   it.each([['counts'], ['scanned']] as const)('%s: counts, pile and discard match the real cards through whole games (many seeds, tables and deck sizes)', (knowledge) => {
@@ -468,6 +468,19 @@ describe('simulated physical table vs the engine (ground truth)', () => {
     }
     expect(total).toBeGreaterThan(25);
     expect(finished).toBe(total);
+  });
+  it.each([['counts'], ['scanned']] as const)('%s: play-on games (last player holding cards loses) finish with a loser and the counts always match reality', (knowledge) => {
+    let finished = 0, total = 0, withLoser = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const nPlayers = 3 + (seed % 4);
+      if ('error' in planDeal(nPlayers, 52)) continue;
+      total++;
+      const out = playOut(seed, nPlayers, 52, knowledge, true, 4000, true);
+      if (out.finished) finished++;
+      if (out.loser) withLoser++;
+    }
+    expect(finished).toBe(total);
+    expect(withLoser).toBe(total);
   });
   it('forgetting to call last card costs two cards, and the counts still match the real hands through every penalty', () => {
     // Bots that never call last card are penalized each time they reach one card, so these games cannot finish by design:
@@ -552,5 +565,52 @@ describe('restocking the draw pile', () => {
       if (s.public.status === 'finished') break;
     }
     expect(s.public.reshuffles ?? 0).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('physical table: winning +2 and play-on mode', () => {
+  const base = (playOn: boolean) => {
+    const t = table(ALL_CARD_IDS, 'counts');
+    return act(startGame(matchingGame, mk(3), rng(), playOn ? { ...t, playOn: true } : t), { type: 'flip', cardId: 'star-5' }).state;
+  };
+  it('a winning +2: once confirmed, the next player draws the two cards before the points are counted', () => {
+    let s = base(false);
+    s.private.p0!.unknown = 1; syncCounts(s);
+    s = act(s, { type: 'play', player: 'p0', cardId: 'star-13' }).state;
+    expect(s.public.pendingDraw).toBe(2);
+    const before = handCount(s, 'p1');
+    s = act(s, { type: 'confirm', ok: true }).state;
+    expect(handCount(s, 'p1')).toBe(before + 2);
+    expect(s.public.pendingDraw).toBe(0);
+    expect(s.public.status).toBe('scoring'); // the unidentified cards still need tapping
+    invariant(s);
+  });
+  it('play-on: confirming a win keeps the game going; when one player is left the round goes to scoring with a named loser', () => {
+    let s = base(true);
+    s.private.p0!.unknown = 1; s.private.p1!.unknown = 1; syncCounts(s);
+    s = act(s, { type: 'play', player: 'p0', cardId: 'star-9' }).state;
+    s = act(s, { type: 'confirm', ok: true }).state;
+    expect(s.public.status).toBe('playing');
+    expect(s.public.placings).toEqual(['p0']);
+    expect(s.public.turn.order).toEqual(['p1', 'p2']);
+    s = act(s, { type: 'play', player: 'p1', cardId: 'star-8' }).state;
+    s = act(s, { type: 'confirm', ok: true }).state;
+    expect(s.public.placings).toEqual(['p0', 'p1']);
+    expect(s.public.status).toBe('scoring');
+    expect(s.public.winner).toBe('p0');
+    expect(s.public.loser).toBe('p2');
+    s = act(s, { type: 'score', cardId: 'circle-13' }).state;
+    expect(s.public.scores.p0).toBe(20);
+    expect(act(s, { type: 'finishScoring' }).state.public.status).toBe('finished');
+  });
+  it('play-on: denying a win still puts the card back and nobody leaves', () => {
+    let s = base(true);
+    s.private.p0!.unknown = 1; syncCounts(s);
+    s = act(s, { type: 'play', player: 'p0', cardId: 'star-9' }).state;
+    s = act(s, { type: 'confirm', ok: false }).state;
+    expect(s.public.status).toBe('playing');
+    expect(s.public.placings ?? []).toEqual([]);
+    expect(s.public.turn.order).toHaveLength(3);
+    expect(handCount(s, 'p0')).toBe(1);
   });
 });
