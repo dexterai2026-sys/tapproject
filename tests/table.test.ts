@@ -93,7 +93,17 @@ describe('virtual dealing with a custom deck', () => {
     const s = startGame(matchingGame, mk(2), rng(), table(deckForCount(40), 'counts', 'virtual', 7));
     const r = act(s, { type: 'play', player: currentPlayer(s.public.turn), cardId: 'star-13' });
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/isn't in this game's deck/);
+    expect(r.message).toBe('star-13 was left out of this game (40 cards in play).');
+  });
+  it('lets a left-out card be added back, keeping the pile count honest', () => {
+    const s = startGame(matchingGame, mk(2), rng(), table(deckForCount(40), 'counts', 'virtual', 7));
+    const r = act(s, { type: 'addCard', cardId: 'star-13' });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.table.deck).toHaveLength(41);
+    expect(r.state.table.deck).toContain('star-13');
+    expect(act(r.state, { type: 'addCard', cardId: 'star-13' }).ok).toBe(false);
+    expect(act(s, { type: 'addCard', cardId: 'nope' }).ok).toBe(false);
   });
   it('refuses to start when there are not enough cards', () => {
     expect(() => startGame(matchingGame, mk(8), rng(), table(deckForCount(20), 'counts', 'virtual', 4))).toThrow(/Not enough cards/);
@@ -300,7 +310,7 @@ describe('physical table: scanned hands', () => {
     s = act(s, { type: 'scan', player: 'p0', cardId: 'star-9' }).state;
     expect(act(s, { type: 'scan', player: 'p0', cardId: 'star-9' }).message).toMatch(/already scanned/);
     expect(act(s, { type: 'scan', player: 'p1', cardId: 'star-9' }).message).toMatch(/in Sam's hand/);
-    expect(act(s, { type: 'scan', player: 'p1', cardId: 'star-13' }).message).toMatch(/deck/);
+    expect(act(s, { type: 'scan', player: 'p1', cardId: 'star-13' }).message).toMatch(/left out of this game/);
     for (const id of ['circle-1', 'square-2']) s = act(s, { type: 'scan', player: 'p0', cardId: id }).state;
     expect(act(s, { type: 'scan', player: 'p0', cardId: 'circle-3' }).message).toMatch(/no unscanned cards left/);
   });

@@ -1,7 +1,8 @@
 import type { Action, ActionResult, Cartridge, Card, GameState, GameStatus, Player, PlayerId, Rng, TableConfig } from '../engine/types';
 import { cardById, shuffle } from '../engine/deck';
+import { ALL_CARD_IDS } from '../engine/deckConfig';
 import { advance, createTurn, currentPlayer, reverse, skip } from '../engine/turns';
-import { deckCards, deckHas, defaultTable, fullyKnown, handCount, inDiscard, knownOwner, knownPoints, physicalDraw, scanInto, syncCounts, unknownOf } from '../engine/table';
+import { deckCards, deckHas, defaultTable, fullyKnown, handCount, inDiscard, knownOwner, knownPoints, outOfDeckMessage, physicalDraw, scanInto, syncCounts, unknownOf } from '../engine/table';
 
 /** Original name (Uno is a Mattel trademark); placeholder until the brief's naming step. */
 export const MATCHING_NAME = 'Match Up';
@@ -162,6 +163,7 @@ const ALLOWED: Record<Action['type'], GameStatus[]> = {
   score: ['scoring'],
   finishScoring: ['scoring'],
   adjust: ['setup', 'playing'],
+  addCard: ['setup', 'scanning', 'playing'],
 };
 
 function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
@@ -178,6 +180,7 @@ function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
     case 'confirm': return doConfirm(s, action.ok);
     case 'score': return doScore(prev, s, action.cardId);
     case 'finishScoring': return doFinishScoring(s);
+    case 'addCard': return doAddCard(prev, s, action.cardId);
     case 'adjust': return doAdjust(prev, s, action.player, action.delta);
     case 'callLast': return doCallLast(prev, s, action.player);
     case 'draw': return doDraw(prev, s, action.player, rng);
@@ -187,9 +190,19 @@ function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
 
 // ---- physical table: setup, scanning, confirming, scoring ------------------
 
+function doAddCard(prev: GameState, s: GameState, cardId: string): ActionResult {
+  const card = cardById(cardId);
+  if (!card) return fail(prev, `${cardId} isn't a card in this game.`);
+  if (deckHas(s, cardId)) return fail(prev, `${card.id} is already in the deck.`);
+  s.table.deck = ALL_CARD_IDS.filter((id) => id === cardId || s.table.deck.includes(id));
+  syncCounts(s);
+  logLine(s, `${card.id} added to the deck (${s.table.deck.length} cards in play).`);
+  return { ok: true, state: s, message: `${card.id} added to the deck.` };
+}
+
 function doFlip(prev: GameState, s: GameState, cardId: string): ActionResult {
   const card = cardById(cardId);
-  if (!card || !deckHas(s, cardId)) return fail(prev, "That card isn't in this game's deck.");
+  if (!card || !deckHas(s, cardId)) return fail(prev, outOfDeckMessage(s, cardId));
   const owner = knownOwner(s, cardId);
   if (owner) return fail(prev, `${card.id} is in ${name(s, owner)}'s hand.`);
   if (card.number > 10) return fail(prev, `${card.id} is a special card. Put it back, shuffle it into the pile, and flip another.`);
@@ -272,7 +285,7 @@ function doConfirm(s: GameState, ok: boolean): ActionResult {
 function doScore(prev: GameState, s: GameState, cardId: string): ActionResult {
   const pub = s.public;
   const card = cardById(cardId);
-  if (!card || !deckHas(s, cardId)) return fail(prev, "That card isn't in this game's deck.");
+  if (!card || !deckHas(s, cardId)) return fail(prev, outOfDeckMessage(s, cardId));
   if (inDiscard(s, cardId)) return fail(prev, `${card.id} was played, not left in a hand.`);
   if (pub.scoredCards.includes(cardId)) return fail(prev, `${card.id} is already counted.`);
   const w = pub.winner as PlayerId;
@@ -346,7 +359,7 @@ function doPlay(prev: GameState, s: GameState, player: PlayerId, cardId: string,
   const hp = s.private[player] as GameState['private'][string];
   const top = topOf(s);
   const card = cardById(cardId);
-  if (!card || !deckHas(s, cardId)) return fail(prev, "That card isn't in this game's deck.");
+  if (!card || !deckHas(s, cardId)) return fail(prev, outOfDeckMessage(s, cardId));
 
   const known = hp.hand.find((c) => c.id === cardId);
   if (!known) {

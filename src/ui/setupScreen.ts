@@ -53,8 +53,9 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
     startBtn.disabled = 'error' in plan;
     if (hintEl) {
       const have = deck.filter((id) => tagged.has(id)).length;
-      hintEl.className = have < deck.length ? 'warn' : 'ok';
-      hintEl.textContent = `${have} of ${deck.length} cards in play have tags registered`;
+      hintEl.className = have < deck.length || [...tagged].some((id) => !deck.includes(id)) ? 'warn' : 'ok';
+      const outside = [...tagged].filter((id) => !deck.includes(id)).length;
+      hintEl.textContent = `${have} of ${deck.length} cards in play have tags registered` + (outside ? `. ${outside} registered ${outside === 1 ? 'card is' : 'cards are'} not in play.` : '');
     }
     for (const b of cardBtns) b.setAttribute('aria-pressed', String(deck.includes(b.dataset.card as string)));
   }

@@ -155,6 +155,9 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 
 Newest first. Add an entry with every push.
 
+### 2026-10-04 (left-out cards)
+- **Fix:** "That card isn't in this game's deck" now says which card and why ("star-13 was left out of this game (40 cards in play)") and offers an **Add it to the deck** button. The usual cause is a remembered smaller "cards in play" count, which drops the highest numbers first. Setup's tag hint also warns when registered tags aren't in play. 242 unit tests; browser-tested.
+
 ### 2026-10-04 (setup remembers choices)
 - **Setup:** the player count and the "Use real NFC taps" checkbox are now remembered between games. First time, NFC defaults on only if the phone supports Web NFC and at least one tag is registered; an explicit choice always wins, and an unsupported browser shows it disabled without losing the saved choice. A hint under the checkbox says how many cards in play have tags registered. 241 unit tests; browser-tested with a stubbed `NDEFReader`.
 

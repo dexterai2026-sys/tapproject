@@ -24,6 +24,12 @@ export const totalInHands = (s: GameState): number => s.players.reduce((n, p) =>
 
 export const deckHas = (s: GameState, cardId: string): boolean => s.table.deck.includes(cardId);
 
+/** Why a tapped card was refused: it's a real card, but this game was set up without it. */
+export function outOfDeckMessage(s: GameState, cardId: string): string {
+  const card = cardById(cardId);
+  return card ? `${card.id} was left out of this game (${s.table.deck.length} cards in play).` : `${cardId} isn't a card in this game.`;
+}
+
 export function deckCards(table: Pick<TableConfig, 'deck'>): Card[] {
   return table.deck.map((id) => cardById(id)).filter((c): c is Card => !!c);
 }
@@ -81,7 +87,7 @@ export function physicalDraw(s: GameState, player: PlayerId, n: number): DrawRes
 /** Identify a card in a player's hand (turn one of their unidentified cards into a known one). Returns an error or null. */
 export function scanInto(s: GameState, player: PlayerId, cardId: string, nameOf: (id: PlayerId) => string): string | null {
   const card = cardById(cardId);
-  if (!card || !deckHas(s, cardId)) return "That card isn't in this game's deck.";
+  if (!card || !deckHas(s, cardId)) return outOfDeckMessage(s, cardId);
   if (inDiscard(s, cardId)) return `${card.id} is already on the pile.`;
   const owner = knownOwner(s, cardId);
   if (owner) return owner === player ? `${card.id} is already scanned.` : `${card.id} is in ${nameOf(owner)}'s hand.`;

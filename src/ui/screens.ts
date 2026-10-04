@@ -1,7 +1,7 @@
 import { h, cardLabel, mount, SUIT_ICON } from './dom';
 import { matchingGame } from '../games/matching';
 import { applyAction, startGame } from '../engine/engine';
-import { STANDARD_DECK, mulberry32, registerChip, resolveChip, simulatedChipId, simulatedChipMap, type ChipMap } from '../engine/deck';
+import { STANDARD_DECK, cardById, mulberry32, registerChip, resolveChip, simulatedChipId, simulatedChipMap, type ChipMap } from '../engine/deck';
 import { currentPlayer } from '../engine/turns';
 import type { Action, Card, Cartridge, GameState, Player, PlayerId, TableConfig } from '../engine/types';
 import { deckCards, handCount, unknownOf } from '../engine/table';
@@ -145,6 +145,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
   const settings = loadSettings();
   let flash = resume ? 'Game resumed.' : '';
   let flashOk = true;
+  let leftOut: string | null = null; // a tapped card this game was set up without: offer to add it back
   const fx = createFeedback({ sound: settings.sound, style: game.feedbackStyle });
   const nameOf = (id: string) => players.find((p) => p.id === id)?.name ?? id;
   const micAvailable = settings.mic !== 'off' && VoiceListener.isSupported();
@@ -221,6 +222,8 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
     state = r.state;
     flash = r.message;
     flashOk = r.ok;
+    const tapped = 'cardId' in a ? a.cardId : null;
+    leftOut = !r.ok && tapped && cardById(tapped) && !state.table.deck.includes(tapped) ? tapped : null;
     fx(r.ok ? 'success' : 'error');
     if (r.ok) {
       if (simTable) {
@@ -499,6 +502,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
         h('h2', {}, heading, pub.status === 'playing' && pub.pendingDraw ? ` — play a +2 or draw ${pub.pendingDraw}` : ''),
         pub.lastCardPending && h('p', { class: 'warn' }, `${nameOf(pub.lastCardPending)} is on one card — call it (L)!`),
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
+        leftOut && h('button', { id: 'add-card', onclick: () => { const id = leftOut as string; act({ type: 'addCard', cardId: id }); } }, `Add ${leftOut} to the deck`),
         h('ul', { class: 'scores' }, players.map((p) => h('li', {}, `${p.name}: ${pub.handCounts[p.id]} cards · ${pub.scores[p.id]} pts`))),
         h('small', {}, `Draw pile: ${pub.drawPileCount}${physical ? ' (counted from your taps)' : ''}`),
         pub.status === 'finished' && tallyList(),

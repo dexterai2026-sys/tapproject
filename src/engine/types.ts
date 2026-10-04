@@ -102,7 +102,8 @@ export type Action =
   | { type: 'confirm'; ok: boolean } // the table confirms (or denies) that the player whose count hit zero is out
   | { type: 'score'; cardId: string } // a leftover card, counted toward the winner's score
   | { type: 'finishScoring' }
-  | { type: 'adjust'; player: PlayerId; delta: number }; // correct a player's card count
+  | { type: 'adjust'; player: PlayerId; delta: number } // correct a player's card count
+  | { type: 'addCard'; cardId: string }; // put a card that was left out back into this game's deck
 
 export type ActionResult =
   | { ok: true; state: GameState; message: string }
