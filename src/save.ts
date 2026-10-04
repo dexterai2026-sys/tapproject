@@ -1,4 +1,5 @@
 import type { GameState, Player } from './engine/types';
+import type { SimSnapshot } from './ui/simTable';
 
 export type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -34,10 +35,12 @@ export interface SavedGame {
   players: Player[];
   realNfc: boolean;
   state: GameState;
+  sim?: SimSnapshot; // the simulator's pretend real cards (physical play), so a paused game resumes with the same hands
   savedAt: number;
 }
 
-const GAME_KEY = 'tap.savedGame.v1';
+// v2: games now carry a table (deck in play, who deals, how much is tracked). v1 saves are ignored.
+const GAME_KEY = 'tap.savedGame.v2';
 
 export function saveGame(g: Omit<SavedGame, 'savedAt'>, store: Store | null = defaultStore(), now = Date.now()): void {
   write(GAME_KEY, { ...g, savedAt: now }, store);
@@ -46,7 +49,7 @@ export function saveGame(g: Omit<SavedGame, 'savedAt'>, store: Store | null = de
 export function loadGame(store: Store | null = defaultStore()): SavedGame | null {
   const g = read<SavedGame>(GAME_KEY, store);
   // Basic shape check so a stale or corrupt save can never crash the app.
-  return g && g.state?.public?.turn && Array.isArray(g.players) && g.cartridgeId ? g : null;
+  return g && g.state?.public?.turn && g.state.table?.deck && Array.isArray(g.players) && g.cartridgeId ? g : null;
 }
 
 export function clearGame(store: Store | null = defaultStore()): void {
@@ -117,3 +120,24 @@ const ONBOARD_KEY = 'tap.onboarded.v1';
 
 export const isOnboarded = (store: Store | null = defaultStore()): boolean => read<boolean>(ONBOARD_KEY, store) === true;
 export const setOnboarded = (done: boolean, store: Store | null = defaultStore()): void => write(ONBOARD_KEY, done, store);
+
+// ---- Deal setup (how cards are dealt, which cards are in play) ------------
+
+export type DealChoice = 'counts' | 'scanned' | 'app';
+
+export interface DealSetup {
+  deal: DealChoice;
+  excluded: string[]; // card ids taken out of play
+}
+
+const DEAL_KEY = 'tap.dealSetup.v1';
+
+export function loadDealSetup(store: Store | null = defaultStore()): DealSetup {
+  const d = read<Partial<DealSetup>>(DEAL_KEY, store);
+  const deal: DealChoice = d?.deal === 'scanned' || d?.deal === 'app' ? d.deal : 'counts';
+  return { deal, excluded: Array.isArray(d?.excluded) ? d.excluded.filter((x): x is string => typeof x === 'string') : [] };
+}
+
+export function saveDealSetup(d: DealSetup, store: Store | null = defaultStore()): void {
+  write(DEAL_KEY, d, store);
+}

@@ -172,3 +172,15 @@ describe('backoff and give-up', () => {
     expect(h.rec.start).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('undo command', () => {
+  it.each(['undo', 'go back', 'take that back', 'take it back', 'my mistake', 'oops', 'hey undo that'])('%s -> undo', (t) => expect(parseCommand(t).type).toBe('undo'));
+  it('does not steal other commands', () => {
+    expect(parseCommand('draw').type).toBe('draw');
+    expect(parseCommand('pause').type).toBe('pause');
+    expect(parseCommand('whose turn').type).toBe('turn');
+  });
+  it('the fallback classifier can answer "undo"', async () => {
+    expect((await resolveCommand('scratch that last move', { apiKey: 'k', model: 'm', chatImpl: async () => 'undo' })).type).toBe('undo');
+  });
+});

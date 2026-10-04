@@ -5,7 +5,7 @@ import { cardName } from '../ai/commentator';
 import type { QueryType } from './command';
 
 export const HELP_TEXT =
-  'You can say: draw, last card, whose turn, score, how many cards, top card, repeat, pause, or play again.';
+  'You can say: draw, last card, whose turn, score, how many cards, top card, repeat, undo, pause, or play again.';
 
 export interface AnswerContext {
   state: GameState;
@@ -21,6 +21,10 @@ export function answerQuery(type: QueryType, ctx: AnswerContext): string {
 
   switch (type) {
     case 'turn': {
+      if (pub.status === 'setup') return 'The game has not started yet. Deal the cards, then flip and tap the first card.';
+      if (pub.status === 'scanning') return `${name(pub.scanning?.player ?? '')} is tapping the cards they drew.`;
+      if (pub.status === 'confirming') return `Waiting to confirm that ${name(pub.pendingWin ?? '')} is out.`;
+      if (pub.status === 'scoring') return `${name(pub.winner ?? '')} is out. Tap the leftover cards to score.`;
       if (pub.status === 'finished') return `${name(pub.winner as string)} won this game.`;
       const extra = pub.pendingDraw ? ` They must play a plus two or draw ${pub.pendingDraw}.` : '';
       return `It's ${name(currentPlayer(pub.turn))}'s turn.${extra}`;
@@ -28,7 +32,7 @@ export function answerQuery(type: QueryType, ctx: AnswerContext): string {
     case 'cards':
       return `${state.players.map((p) => `${p.name} ${pub.handCounts[p.id] ?? 0}`).join(', ')} cards.`;
     case 'top':
-      return `The top card is the ${cardName(pub.discard[pub.discard.length - 1] as never)}.`;
+      return pub.discard.length ? `The top card is the ${cardName(pub.discard[pub.discard.length - 1] as never)}.` : 'No card has been flipped yet.';
     case 'repeat':
       return ctx.lastSpoken || 'Nothing to repeat yet.';
     case 'help':

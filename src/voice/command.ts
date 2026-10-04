@@ -7,6 +7,7 @@ export type VoiceCommand =
   | { type: QueryType }
   | { type: 'pause' }
   | { type: 'again' }
+  | { type: 'undo' }
   | { type: 'unknown' };
 
 const MAX_WORDS = 8; // commands are short; long utterances are table chatter
@@ -63,6 +64,7 @@ export function parseCommand(text: string): VoiceCommand {
   if (/\b(top card|on top|what card is (up|showing|out)|what'?s showing|current card)\b/.test(t)) return { type: 'top' };
   if (/\b(repeat|say that again|say again|what was that)\b/.test(t)) return { type: 'repeat' };
   if (/\b(help|what can i say|commands)\b/.test(t)) return { type: 'help' };
+  if (/\b(undo|go back|take (that|it) back|my mistake|oops)\b/.test(t)) return { type: 'undo' };
   if (/\bpause\b/.test(t)) return { type: 'pause' };
   if (/\b(play again|new game|rematch)\b/.test(t)) return { type: 'again' };
   return { type: 'unknown' };
@@ -71,7 +73,7 @@ export function parseCommand(text: string): VoiceCommand {
 const LABELS: Record<string, VoiceCommand> = {
   draw: { type: 'draw' }, last: { type: 'callLast' }, turn: { type: 'turn' }, score: { type: 'score' },
   cards: { type: 'cards' }, top: { type: 'top' }, repeat: { type: 'repeat' }, help: { type: 'help' },
-  pause: { type: 'pause' }, again: { type: 'again' },
+  pause: { type: 'pause' }, again: { type: 'again' }, undo: { type: 'undo' },
 };
 
 export interface ResolveOptions {
@@ -106,7 +108,7 @@ export async function resolveDetailed(text: string, o: ResolveOptions = {}): Pro
       temperature: 0,
       timeoutMs: 3000,
       messages: [
-        { role: 'system', content: 'Classify a card-game voice command. Answer with exactly one word from: draw (wants to draw a card), last (announcing one card left), turn (asking whose turn), score (asking the score), cards (asking card counts), top (asking the top card), repeat (asking to repeat), help (asking what they can say), pause (pause the game), again (play another game), none.' },
+        { role: 'system', content: 'Classify a card-game voice command. Answer with exactly one word from: draw (wants to draw a card), last (announcing one card left), turn (asking whose turn), score (asking the score), cards (asking card counts), top (asking the top card), repeat (asking to repeat), help (asking what they can say), pause (pause the game), again (play another game), undo (take back the last move), none.' },
         { role: 'user', content: text },
       ],
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cleanNames, clearGame, isOnboarded, loadGame, loadNames, loadTally, recordWin, resetTally, saveGame, saveNames, saveTally, setOnboarded, type Store } from '../src/save';
+import { cleanNames, clearGame, isOnboarded, loadDealSetup, loadGame, loadNames, loadTally, recordWin, resetTally, saveDealSetup, saveGame, saveNames, saveTally, setOnboarded, type Store } from '../src/save';
 import { createFeedback, cueFor, type AudioCtxLike } from '../src/ui/feedback';
 import { Onboarding } from '../src/ui/onboarding';
 import { applyDisplay, displayAttrs } from '../src/ui/display';
@@ -7,6 +7,7 @@ import { matchingGame } from '../src/games/matching';
 import { applyAction, startGame } from '../src/engine/engine';
 import { mulberry32 } from '../src/engine/deck';
 import { currentPlayer } from '../src/engine/turns';
+import { ALL_CARD_IDS } from '../src/engine/deckConfig';
 
 function memStore(): Store & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -161,5 +162,33 @@ describe('display settings', () => {
     const root = { dataset: {} as Record<string, string> } as unknown as HTMLElement;
     applyDisplay({ textSize: 'L', highContrast: true }, root);
     expect(root.dataset).toMatchObject({ size: 'L', contrast: 'high' });
+  });
+});
+
+describe('saved games carry the table; deal setup is remembered', () => {
+  it('a saved game without a table (an older save) is ignored instead of crashing', () => {
+    const store = memStore();
+    store.setItem('tap.savedGame.v2', JSON.stringify({ cartridgeId: 'matching', players, realNfc: false, savedAt: 1, state: { public: { turn: {} } } }));
+    expect(loadGame(store)).toBeNull();
+    store.setItem('tap.savedGame.v1', JSON.stringify({ cartridgeId: 'matching' }));
+    expect(loadGame(store)).toBeNull(); // the old key is not even read
+  });
+  it('a physical game round-trips with its simulated hands', () => {
+    const store = memStore();
+    const state = startGame(matchingGame, players, mulberry32(2), { mode: 'physical', knowledge: 'scanned', deck: ALL_CARD_IDS, handSize: 7 });
+    saveGame({ cartridgeId: 'matching', players, realNfc: false, state, sim: { hands: { p0: [], p1: [], p2: [] }, pile: [], discard: [] } }, store, 5);
+    const back = loadGame(store)!;
+    expect(back.state.table.mode).toBe('physical');
+    expect(back.sim).toEqual({ hands: { p0: [], p1: [], p2: [] }, pile: [], discard: [] });
+  });
+  it('deal setup defaults to count-only with every card, and ignores junk', () => {
+    const store = memStore();
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [] });
+    saveDealSetup({ deal: 'scanned', excluded: ['star-7'] }, store);
+    expect(loadDealSetup(store)).toEqual({ deal: 'scanned', excluded: ['star-7'] });
+    store.setItem('tap.dealSetup.v1', JSON.stringify({ deal: 'banana', excluded: [1, 'x', null] }));
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: ['x'] });
+    store.setItem('tap.dealSetup.v1', '{broken');
+    expect(loadDealSetup(store)).toEqual({ deal: 'counts', excluded: [] });
   });
 });

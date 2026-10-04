@@ -1,4 +1,4 @@
-import type { Action, ActionResult, Cartridge, GameState, Player, PlayerId, PlayerView, Rng } from './types';
+import type { Action, ActionResult, Cartridge, GameState, Player, PlayerId, PlayerView, Rng, TableConfig } from './types';
 import { cardById } from './deck';
 
 export function validatePlayerCount(cartridge: Cartridge, count: number): string | null {
@@ -7,10 +7,10 @@ export function validatePlayerCount(cartridge: Cartridge, count: number): string
   return count >= p.min && count <= p.max ? null : `${cartridge.name} needs ${p.min}-${p.max} players`;
 }
 
-export function startGame(cartridge: Cartridge, players: Player[], rng: Rng): GameState {
+export function startGame(cartridge: Cartridge, players: Player[], rng: Rng, table?: TableConfig): GameState {
   const err = validatePlayerCount(cartridge, players.length);
   if (err) throw new Error(err);
-  return cartridge.setup(players, rng);
+  return cartridge.setup(players, rng, table);
 }
 
 export function applyAction(cartridge: Cartridge, state: GameState, action: Action, rng: Rng): ActionResult {

@@ -57,3 +57,22 @@ describe('answerQuery', () => {
     expect(JSON.stringify(s)).toBe(before);
   });
 });
+
+describe('answerQuery for the physical-table phases', () => {
+  const base = () => startGame(matchingGame, players, rng, { mode: 'physical', knowledge: 'counts', deck: STANDARD_DECK.map((c) => c.id), handSize: 7 });
+  it('before the first card: turn and top card say the game has not started', () => {
+    const s = base();
+    expect(ask('turn', s)).toMatch(/has not started yet/);
+    expect(ask('top', s)).toBe('No card has been flipped yet.');
+    expect(ask('cards', s)).toBe('Sam 7, Lee 7, Kai 7 cards.');
+  });
+  it('while confirming or scoring, the answers name who and what is pending', () => {
+    const s = base();
+    const c = structuredClone(s); c.public.status = 'confirming'; c.public.pendingWin = 'p1';
+    expect(ask('turn', c)).toBe('Waiting to confirm that Lee is out.');
+    const sc = structuredClone(s); sc.public.status = 'scoring'; sc.public.winner = 'p2';
+    expect(ask('turn', sc)).toBe('Kai is out. Tap the leftover cards to score.');
+    const sn = structuredClone(s); sn.public.status = 'scanning'; sn.public.scanning = { player: 'p0', remaining: 2 };
+    expect(ask('turn', sn)).toBe('Sam is tapping the cards they drew.');
+  });
+});

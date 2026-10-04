@@ -25,11 +25,15 @@ export const cardName = (c: Card) => `${c.number === 11 ? 'skip' : c.number === 
 export function momentFor(prev: GameState, action: Action, result: ActionResult): Moment | null {
   if (!result.ok) return null;
   const pub = result.state.public;
+  // Setup, scanning, count corrections and scoring are bookkeeping: no commentary. Confirming a win is the win.
+  if (action.type === 'confirm') return pub.winner ? 'win' : null;
+  if (action.type !== 'play' && action.type !== 'draw' && action.type !== 'callLast') return null;
   if (pub.winner) return 'win';
   if (action.type === 'callLast') return 'lastCall';
   const missed = prev.public.lastCardPending && prev.public.lastCardPending !== action.player;
   if (missed) return 'lastMissed';
   if (action.type === 'draw') return 'draw';
+  if (pub.status === 'confirming') return null; // their last card: wait for the table to confirm before reacting
   const top = pub.discard[pub.discard.length - 1] as Card;
   return top.number === 11 ? 'skip' : top.number === 12 ? 'reverse' : top.number === 13 ? 'drawTwo' : 'play';
 }
@@ -50,7 +54,8 @@ export class Commentator {
     const st = result.state;
     const nameOf = (id: string) => st.players.find((p) => p.id === id)?.name ?? id;
     const next = nameOf(currentPlayer(st.public.turn));
-    const name = nameOf(moment === 'lastMissed' ? (prev.public.lastCardPending as string) : action.player);
+    const actor = 'player' in action ? action.player : (st.public.winner ?? '');
+    const name = nameOf(moment === 'lastMissed' ? (prev.public.lastCardPending as string) : moment === 'win' ? (st.public.winner ?? actor) : actor);
     const top = st.public.discard[st.public.discard.length - 1] as Card;
     const vars = { name, next, card: cardName(top) };
     const finished = st.public.status === 'finished';
