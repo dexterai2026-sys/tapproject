@@ -34,6 +34,9 @@ export function deckCards(table: Pick<TableConfig, 'deck'>): Card[] {
   return table.deck.map((id) => cardById(id)).filter((c): c is Card => !!c);
 }
 
+/** Real cards only: the draw pile is empty but there are discards to shuffle into a new one (the top card stays). */
+export const restockDue = (s: GameState): boolean => s.table.mode === 'physical' && s.public.status === 'playing' && s.public.drawPileCount === 0 && s.public.discard.length > 1;
+
 export const inDiscard = (s: GameState, cardId: string): boolean => s.public.discard.some((c) => c.id === cardId);
 
 /** Which player's hand a card is known to be in, if the app has identified it. */
@@ -71,12 +74,15 @@ export function physicalDraw(s: GameState, player: PlayerId, n: number): DrawRes
   const spare = Math.max(0, s.public.discard.length - 1);
   const drawn = Math.min(n, pile + spare);
   const reshuffled = n > pile && spare > 0;
-  if (reshuffled) s.public.discard = [s.public.discard[s.public.discard.length - 1] as Card]; // history before the reshuffle is gone
+  if (reshuffled) {
+    s.public.discard = [s.public.discard[s.public.discard.length - 1] as Card]; // history before the reshuffle is gone
+    s.public.reshuffles = (s.public.reshuffles ?? 0) + 1;
+  }
   const p = s.private[player] as PrivateState;
   p.unknown = unknownOf(p) + drawn;
   const note =
     drawn < n
-      ? `Only ${drawn} card${drawn === 1 ? '' : 's'} left in the whole game.`
+      ? `Only ${drawn} card${drawn === 1 ? '' : 's'} left in the whole game${drawn === 0 ? '; the turn passes' : ''}.`
       : reshuffled
         ? 'The pile ran out: reshuffle the discard pile, keeping the top card.'
         : '';

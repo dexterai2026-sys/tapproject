@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseCommand, resolveCommand, stripWakeWord } from '../src/voice/command';
-import { BASE_DELAY_MS, MAX_DELAY_MS, MAX_FAILURES, VoiceListener, backoffDelay, type RecognitionLike } from '../src/voice/listener';
+import { BASE_DELAY_MS, MAX_DELAY_MS, MAX_FAILURES, RESUME_TAIL_MS, VoiceListener, backoffDelay, type RecognitionLike } from '../src/voice/listener';
 
 describe('parseCommand', () => {
   it.each([
@@ -76,7 +76,7 @@ describe('resolveCommand', () => {
 class FakeRec implements RecognitionLike {
   continuous = false; interimResults = false; lang = '';
   onresult: RecognitionLike['onresult'] = null; onend: RecognitionLike['onend'] = null; onerror: RecognitionLike['onerror'] = null;
-  start = vi.fn(); stop = vi.fn();
+  start = vi.fn(); stop = vi.fn(); abort = vi.fn();
   say(t: string, isFinal = true) { this.onresult?.({ resultIndex: 0, results: [{ isFinal, 0: { transcript: t } }] }); }
 }
 
@@ -103,6 +103,39 @@ describe('VoiceListener', () => {
     const l = new VoiceListener({ mode: 'push', wakeWord: '', onUtterance: (t) => got.push(t), onError: (m) => errs.push(m), factory: () => rec });
     l.start(); l.muted = true; rec.say('draw'); expect(got).toEqual([]);
     rec.onerror!({ error: 'not-allowed' }); expect(errs[0]).toContain('not-allowed');
+  });
+});
+
+describe('pause while the app speaks', () => {
+  function rig(mode: 'wake' | 'push' = 'wake') {
+    const rec = new FakeRec(); const timers: { fn: () => void; ms: number }[] = []; const errs: string[] = []; let gaveUp = 0;
+    const l = new VoiceListener({
+      mode, wakeWord: 'hey deck', onUtterance: () => {}, onError: (m) => errs.push(m), onGiveUp: () => gaveUp++, factory: () => rec,
+      schedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, cancel: () => {},
+    });
+    return { rec, l, timers, errs, gaveUp: () => gaveUp };
+  }
+  it('closes the mic while speaking, reopens after a short tail, and counts no failure', () => {
+    const { rec, l, timers, errs, gaveUp } = rig();
+    l.start(); expect(rec.start).toHaveBeenCalledTimes(1);
+    l.pause(); expect(rec.abort).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 10; i++) { rec.onend!(); } // the recognizer's end events must not restart it or count as failures
+    expect(rec.start).toHaveBeenCalledTimes(1);
+    expect(l.consecutiveFailures).toBe(0);
+    l.resume();
+    expect(timers.at(-1)!.ms).toBe(RESUME_TAIL_MS);
+    timers.at(-1)!.fn();
+    expect(rec.start).toHaveBeenCalledTimes(2);
+    expect(errs).toEqual([]); expect(gaveUp()).toBe(0);
+  });
+  it('does not reopen if paused again before the tail ends, and ignores push mode', () => {
+    const { rec, l, timers } = rig();
+    l.start(); l.pause(); l.resume();
+    const reopen = timers.at(-1)!.fn;
+    l.pause(); reopen();
+    expect(rec.start).toHaveBeenCalledTimes(1);
+    const p = rig('push'); p.l.start(); p.l.pause();
+    expect(p.rec.abort).not.toHaveBeenCalled();
   });
 });
 

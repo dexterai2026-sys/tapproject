@@ -26,7 +26,7 @@ describe('answerQuery', () => {
     expect(ask('turn', p)).toContain('must play a plus two or draw 4');
   });
   it('cards lists everyone in seat order', () => {
-    expect(ask('cards', s)).toBe('Sam 3, Lee 1, Kai 2 cards.');
+    expect(ask('cards', s)).toMatch(/^Sam 3, Lee 1, Kai 2 cards\. Draw pile \d+\.$/);
   });
   it('top reads the top card, using the special-card names', () => {
     expect(ask('top', s)).toBe('The top card is the 5 of stars.');
@@ -64,7 +64,7 @@ describe('answerQuery for the physical-table phases', () => {
     const s = base();
     expect(ask('turn', s)).toMatch(/has not started yet/);
     expect(ask('top', s)).toBe('No card has been flipped yet.');
-    expect(ask('cards', s)).toBe('Sam 7, Lee 7, Kai 7 cards.');
+    expect(ask('cards', s)).toMatch(/^Sam 7, Lee 7, Kai 7 cards\. Draw pile \d+/);
   });
   it('while confirming or scoring, the answers name who and what is pending', () => {
     const s = base();

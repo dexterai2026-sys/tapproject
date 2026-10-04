@@ -1,5 +1,6 @@
 import type { GameState } from '../engine/types';
 import { currentPlayer } from '../engine/turns';
+import { restockDue } from '../engine/table';
 import type { Tally } from '../save';
 import { cardName } from '../ai/commentator';
 import type { QueryType } from './command';
@@ -30,7 +31,7 @@ export function answerQuery(type: QueryType, ctx: AnswerContext): string {
       return `It's ${name(currentPlayer(pub.turn))}'s turn.${extra}`;
     }
     case 'cards':
-      return `${state.players.map((p) => `${p.name} ${pub.handCounts[p.id] ?? 0}`).join(', ')} cards.`;
+      return `${state.players.map((p) => `${p.name} ${pub.handCounts[p.id] ?? 0}`).join(', ')} cards. Draw pile ${pub.drawPileCount}${restockDue(state) ? ': empty, shuffle the discards into a new pile' : ''}.`;
     case 'top':
       return pub.discard.length ? `The top card is the ${cardName(pub.discard[pub.discard.length - 1] as never)}.` : 'No card has been flipped yet.';
     case 'repeat':

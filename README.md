@@ -13,6 +13,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
 | Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
+| Mic closes while the app speaks (fixes audio cut-outs); draw pile empty/restock prompts for real cards | Built and tested with a fake recognizer and 10-card simulated games. **Not yet confirmed on a real phone** |
 | Setup remembers your choices: player count, "Use real NFC taps" (defaults on when the phone supports it and tags are registered), dealing, deck | Built and tested, with a "N of M cards have tags" hint. |
 | Real-card table model: count-only and scan-hands dealing, any number of cards in play | Built and tested: counts match real hands through whole simulated games (3,000+ moves, many deck sizes). **Not yet tried with real NFC cards** |
 | Voice speed: hybrid voice, pipelined + cached Lazybird, heard-text, wake-word timing | Built; verified in a browser against a mocked 4s Lazybird (answers audible in ~440ms, repeats from cache in ~470ms). **Real-phone gain, iOS behavior and voice quality still to confirm** |
@@ -154,6 +155,10 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-04 (audio cut-outs, draw pile restock)
+- **Audio:** in wake-word mode the mic stayed open while the app spoke (only the transcripts were dropped), which on phones switches to call-style audio and cuts playback. The listener now really closes the mic while the app talks and reopens it ~350ms after, without counting that as a failure. Push-to-talk is unchanged. **Needs a real-phone check.** If it still clips, use push-to-talk.
+- **Draw pile:** a 10-card deck at 2-3 players now has simulated whole-game checks (counts and scanned): hands + pile + discard always equal the deck, and every restock keeps the top card. New: the screen and voice say right away when the pile is empty and the discards need shuffling; restocks are counted and logged (also in app-dealt games); a draw with nothing left anywhere says the turn passes. 4+ players can't be dealt from 10 cards (the app refuses at setup).
 
 ### 2026-10-04 (left-out cards)
 - **Fix:** "That card isn't in this game's deck" now says which card and why ("star-13 was left out of this game (40 cards in play)") and offers an **Add it to the deck** button. The usual cause is a remembered smaller "cards in play" count, which drops the highest numbers first. Setup's tag hint also warns when registered tags aren't in play. 242 unit tests; browser-tested.

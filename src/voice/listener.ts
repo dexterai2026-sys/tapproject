@@ -14,6 +14,7 @@ export interface RecognitionLike {
   onspeechend?: (() => void) | null;
   start(): void;
   stop(): void;
+  abort?(): void;
 }
 
 export type ListenMode = 'push' | 'wake';
@@ -40,6 +41,7 @@ export interface ListenerOptions {
 export const MAX_FAILURES = 5;
 export const BASE_DELAY_MS = 500;
 export const MAX_DELAY_MS = 30_000;
+export const RESUME_TAIL_MS = 350; // after the app stops talking, wait this long before the mic reopens
 const QUICK_END_MS = 1000; // a session that dies this fast with no result counts as a failure
 
 /** Delay before the nth consecutive restart (n starts at 1): 0.5s, 1s, 2s … capped at 30s. */
@@ -62,7 +64,8 @@ export class VoiceListener {
   private startedAt = 0;
   private gotResult = false;
   private errored = false;
-  muted = false; // set while the app itself is speaking, to avoid hearing itself
+  muted = false; // safety net: transcripts heard while the app speaks are dropped
+  private paused = false;
 
   constructor(private o: ListenerOptions) {}
 
@@ -81,7 +84,44 @@ export class VoiceListener {
     this.begin();
   }
 
+  /**
+   * Really close the mic while the app speaks. An open mic switches phones to call-style audio, which
+   * ducks or cuts the app's own playback, so dropping transcripts (`muted`) is not enough. Wake mode only.
+   */
+  pause(): void {
+    if (!this.active || this.o.mode !== 'wake' || this.paused) return;
+    this.paused = true;
+    this.cancelTimer();
+    try {
+      (this.rec?.abort ?? this.rec?.stop)?.call(this.rec);
+    } catch {
+      /* already stopped */
+    }
+  }
+
+  /** Reopen the mic after a short tail so the end of the app's own voice isn't heard. */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.cancelTimer();
+    const rec = this.rec;
+    const go = () => {
+      this.timer = null;
+      if (!this.active || this.paused || this.rec !== rec || !rec) return;
+      this.startedAt = (this.o.now ?? Date.now)();
+      this.gotResult = false;
+      this.errored = false;
+      try {
+        rec.start();
+      } catch {
+        /* still shutting down: its end event restarts it */
+      }
+    };
+    this.timer = (this.o.schedule ?? ((fn, ms) => setTimeout(fn, ms)))(go, RESUME_TAIL_MS);
+  }
+
   stop(): void {
+    this.paused = false;
     this.active = false;
     this.cancelTimer();
     this.rec?.stop();
@@ -138,6 +178,7 @@ export class VoiceListener {
 
   private onEnd(rec: RecognitionLike): void {
     if (rec !== this.rec) return;
+    if (this.paused) return; // we closed it on purpose; resume() reopens it, and this is not a failure
     if (!this.active || this.o.mode !== 'wake') {
       this.active = false;
       this.o.onListening?.(false);

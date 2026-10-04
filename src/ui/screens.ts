@@ -4,7 +4,7 @@ import { applyAction, startGame } from '../engine/engine';
 import { STANDARD_DECK, cardById, mulberry32, registerChip, resolveChip, simulatedChipId, simulatedChipMap, type ChipMap } from '../engine/deck';
 import { currentPlayer } from '../engine/turns';
 import type { Action, Card, Cartridge, GameState, Player, PlayerId, TableConfig } from '../engine/types';
-import { deckCards, handCount, unknownOf } from '../engine/table';
+import { deckCards, handCount, restockDue, unknownOf } from '../engine/table';
 import { nextScanner } from '../games/matching';
 import { SimTable, syncSim, type SimSnapshot } from './simTable';
 import { setupScreen as showSetup, type GameStart } from './setupScreen';
@@ -34,6 +34,7 @@ import {
 } from '../save';
 
 const GAMES: Cartridge[] = [matchingGame];
+const RESTOCK_TEXT = 'The draw pile is empty. Shuffle the discard pile, keeping the top card, to make a new draw pile.';
 // `?seed=123` makes shuffles repeatable, so browser tests are deterministic. Normal play is random.
 const seedParam = (() => {
   try {
@@ -181,7 +182,10 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
   const speaker = createSpeaker(
     settings,
     (busy) => {
-      if (listener) listener.muted = busy && !pttHeld; // don't hear our own voice, unless the user is holding to talk
+      if (!listener) return;
+      listener.muted = busy && !pttHeld; // safety net: never act on our own voice
+      if (busy && !pttHeld) listener.pause(); // and close the mic while we talk, or the phone cuts our audio
+      else listener.resume();
     },
     (line) => {
       // Sample the device's output latency at the moment this line became audible.
@@ -245,6 +249,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
     }
     if (via.tap && a.type === 'play') onboarding.onTap(r.ok); // the guided first tap is a real play, not dealing
     if (via.voice && r.ok) onboarding.onVoiceCommand();
+    if (r.ok && restockDue(state) && !restockDue(prev)) say(RESTOCK_TEXT, { trace: tr, kind: 'answer' }); // announce once, the moment the pile runs out
     tr.mark('acted');
     tr.meta('ok', r.ok);
     if (via.voice) say(r.message, { trace: tr, kind: 'confirmation' }); // confirm aloud first: short, instant, and what the player is waiting for
@@ -504,7 +509,8 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
         leftOut && h('button', { id: 'add-card', onclick: () => { const id = leftOut as string; act({ type: 'addCard', cardId: id }); } }, `Add ${leftOut} to the deck`),
         h('ul', { class: 'scores' }, players.map((p) => h('li', {}, `${p.name}: ${pub.handCounts[p.id]} cards · ${pub.scores[p.id]} pts`))),
-        h('small', {}, `Draw pile: ${pub.drawPileCount}${physical ? ' (counted from your taps)' : ''}`),
+        h('small', {}, `Draw pile: ${pub.drawPileCount}${physical ? ' (counted from your taps)' : ''}${pub.reshuffles ? ` · restocked ${pub.reshuffles}×` : ''}`),
+        restockDue(state) && h('p', { id: 'restock', class: 'warn', role: 'status' }, RESTOCK_TEXT),
         pub.status === 'finished' && tallyList(),
         caption && h('p', { class: 'caption', 'aria-live': 'polite' }, `🎙 ${caption}`),
         notice && h('small', { class: 'warn' }, notice),

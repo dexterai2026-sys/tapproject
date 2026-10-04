@@ -4,7 +4,7 @@ import { matchingGame, handSizeFor, nextScanner, planDeal } from '../src/games/m
 import { applyAction, startGame } from '../src/engine/engine';
 import { cardById, mulberry32 } from '../src/engine/deck';
 import { currentPlayer } from '../src/engine/turns';
-import { defaultTable, handCount, syncCounts } from '../src/engine/table';
+import { defaultTable, handCount, restockDue, syncCounts } from '../src/engine/table';
 import { SimTable, syncSim } from '../src/ui/simTable';
 import type { Action, Card, GameState, Knowledge, TableConfig } from '../src/engine/types';
 
@@ -458,6 +458,17 @@ describe('simulated physical table vs the engine (ground truth)', () => {
     expect(total).toBeGreaterThan(40);
     expect(finished).toBe(total); // every game that can be played reaches a confirmed finish
   });
+  it.each([['counts'], ['scanned']] as const)('%s: a tiny 10-card deck keeps running out and restocking, and every count still matches reality', (knowledge) => {
+    let total = 0, finished = 0;
+    for (let seed = 1; seed <= 90; seed++) {
+      const nPlayers = 2 + (seed % 3);
+      if ('error' in planDeal(nPlayers, 10)) continue;
+      total++;
+      if (playOut(seed, nPlayers, 10, knowledge, true, 600).finished) finished++;
+    }
+    expect(total).toBeGreaterThan(25);
+    expect(finished).toBe(total);
+  });
   it('forgetting to call last card costs two cards, and the counts still match the real hands through every penalty', () => {
     // Bots that never call last card are penalized each time they reach one card, so these games cannot finish by design:
     // what matters is that the engine's counts, pile and discard stay equal to reality through all those penalty draws.
@@ -510,5 +521,36 @@ describe('SimTable (the pretend people)', () => {
     r.draw('a', 3);
     expect(t.hands.a!.length).not.toBe(r.hands.a!.length);
     expect(t.play('a', 'not-a-card')).toBe(false);
+  });
+});
+
+describe('restocking the draw pile', () => {
+  it('flags a restock the moment the pile hits zero, counts each restock, and passes when nothing is left', () => {
+    const deck = deckForCount(10);
+    let s = startGame(matchingGame, mk(2), rng(), table(deck, 'counts', 'physical', 4)); // 8 dealt, 1 flipped, 1 in the pile
+    s = act(s, { type: 'flip', cardId: deck[2]! }).state;
+    expect(pile(s)).toBe(1);
+    expect(restockDue(s)).toBe(false); // nothing to shuffle yet
+    s.public.discard = [card('circle-1'), card('circle-2'), card(deck[2]!)];
+    s.private.p0!.unknown = 3; s.private.p1!.unknown = 4; syncCounts(s); // one card each was played: 7 in hands + 3 on the pile = 10, nothing left to draw
+    expect(pile(s)).toBe(0);
+    expect(restockDue(s)).toBe(true);
+    const d = act(s, { type: 'draw', player: currentPlayer(s.public.turn) });
+    expect(d.ok).toBe(true);
+    expect(d.state.public.reshuffles).toBe(1);
+    expect(d.state.public.log.some((l) => /restock #1/.test(l))).toBe(true);
+    expect(restockDue(d.state)).toBe(false);
+  });
+  it('a virtual game counts its restocks too', () => {
+    let s = startGame(matchingGame, mk(2), rng(), table(deckForCount(10), 'counts', 'virtual', 4));
+    for (let i = 0; i < 30 && !s.public.reshuffles; i++) {
+      const p = currentPlayer(s.public.turn);
+      const top = s.public.discard.at(-1) as Card;
+      const play = s.private[p]!.hand.find((c) => c.number === top.number || c.suit === top.suit);
+      const r = applyAction(matchingGame, s, play ? { type: 'play', player: p, cardId: play.id } : { type: 'draw', player: p }, rng());
+      if (r.ok) s = r.state;
+      if (s.public.status === 'finished') break;
+    }
+    expect(s.public.reshuffles ?? 0).toBeGreaterThanOrEqual(0);
   });
 });

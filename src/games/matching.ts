@@ -53,6 +53,7 @@ function drawCards(s: GameState, player: PlayerId, n: number, rng: Rng): number 
       const top = s.public.discard.pop() as Card;
       s.hidden.drawPile = shuffle(s.public.discard, rng);
       s.public.discard = [top];
+      s.public.reshuffles = (s.public.reshuffles ?? 0) + 1;
     }
     const card = s.hidden.drawPile.pop();
     if (!card) break;
@@ -342,7 +343,8 @@ function doDraw(prev: GameState, s: GameState, player: PlayerId, rng: Rng): Acti
   const { drawn, note } = pickUp(s, player, owed, rng);
   pub.pendingDraw = 0;
   pub.turn = advance(pub.turn);
-  const line = `${who} draws ${drawn}.${note ? ` ${note}` : ''}`;
+  const line = drawn === 0 ? `${who} can't draw. ${note}` : `${who} draws ${drawn}.${note ? ` ${note}` : ''}`;
+  if (s.public.reshuffles !== (prev.public.reshuffles ?? 0) && drawn > 0) logLine(s, `Draw pile restocked from the discards (restock #${s.public.reshuffles}).`);
   logLine(s, line);
   if (isPhysical(s) && s.table.knowledge === 'scanned' && drawn > 0) {
     pub.status = 'scanning';

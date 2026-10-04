@@ -54,6 +54,7 @@ export interface PublicState {
   scanning: { player: PlayerId; remaining: number } | null;
   pendingWin: PlayerId | null;
   scoredCards: string[]; // leftover cards already counted this round
+  reshuffles?: number; // how many times the discard pile has been restocked into the draw pile (absent in older saves)
   turn: TurnState;
   discard: Card[]; // last element is the top card
   drawPileCount: number;
