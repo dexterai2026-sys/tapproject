@@ -5,6 +5,7 @@ import { ALL_CARD_IDS, deckForCount, deckFromExcluded, describeDeck, excludedFro
 import type { Cartridge, Player, TableConfig } from '../engine/types';
 import { WebNfcInput } from '../input/webnfc';
 import { loadChipMap } from '../storage';
+import { resolveChip } from '../engine/deck';
 
 export interface GameStart {
   players: Player[];
@@ -44,6 +45,41 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
   let planEl: HTMLElement;
   let startBtn: HTMLButtonElement;
   let hintEl: HTMLElement | undefined;
+
+  // "Tap the cards I'm using": tap each real card once and the deck becomes exactly those cards.
+  let capture: WebNfcInput | null = null;
+  let capturing = false;
+  let tapped: string[] = [];
+  let captureMsg = '';
+  let captureEl: HTMLElement | undefined;
+  const chips = loadChipMap();
+  function paintCapture(): void {
+    if (!captureEl) return;
+    captureEl.hidden = !capturing;
+    captureEl.querySelector('#tap-status')!.textContent = captureMsg || (tapped.length ? `${tapped.length} cards tapped: ${tapped.join(', ')}` : 'Tap each card you are playing with, once.');
+    (captureEl.querySelector('#tap-use') as HTMLButtonElement).disabled = tapped.length === 0;
+  }
+  function stopCapture(): void {
+    capture?.stop();
+    capture = null;
+    capturing = false;
+    paintCapture();
+  }
+  function startCapture(): void {
+    tapped = [];
+    captureMsg = '';
+    capturing = true;
+    capture = new WebNfcInput();
+    capture.subscribe((chipId) => {
+      const card = resolveChip(chips, chipId);
+      if (!card) captureMsg = 'That tag is not registered yet. Register it under Tags first.';
+      else if (tapped.includes(card.id)) captureMsg = `${card.id} was already tapped.`;
+      else { tapped = [...tapped, card.id]; captureMsg = ''; }
+      paintCapture();
+    });
+    capture.start()?.catch((e: Error) => { captureMsg = e.message; paintCapture(); });
+    paintCapture();
+  }
   let cardBtns: HTMLButtonElement[] = [];
   function updateDeckViews(): void {
     const plan = game.planDeal(n, deck.length);
@@ -97,6 +133,17 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
         (summaryEl = h('p', { class: 'deck-summary' }, describeDeck(deck))),
         (planEl = h('p', { role: 'status', class: 'error' in plan ? 'err' : 'ok' },
           'error' in plan ? plan.error : `${n} players: deal ${plan.handSize} cards each, leaving ${plan.pile} in the draw pile.`)),
+        nfcOk && h('button', { id: 'tap-deck', onclick: () => (capturing ? stopCapture() : startCapture()) }, 'Tap the cards I\'m using'),
+        (captureEl = h('div', { class: 'deck-picker', hidden: true },
+          h('p', { id: 'tap-status', role: 'status' }, ''),
+          h('button', { id: 'tap-use', class: 'primary', onclick: () => {
+            if (!tapped.length) return;
+            deck = ALL_CARD_IDS.filter((id) => tapped.includes(id));
+            persist();
+            stopCapture();
+            updateDeckViews();
+          } }, 'Use these cards'),
+          h('button', { id: 'tap-cancel', class: 'link', onclick: stopCapture }, 'Cancel'))),
         (cardBtns = []) && h('details', { class: 'deck-picker' },
           h('summary', {}, 'Choose the exact cards (e.g. a card is missing)'),
           h('div', { class: 'deck-grid' }, SHAPES.map((shape) =>
@@ -126,15 +173,17 @@ export function setupScreen(game: Cartridge, onStart: (cfg: GameStart) => void, 
         const clean = cleanNames(Array.from({ length: n }, (_, i) => names[i] ?? ''));
         saveNames([...clean.map((c, i) => (names[i]?.trim() ? c : '')), ...names.slice(n)]);
         persist();
+        stopCapture();
         onStart({
           players: clean.map((name, i) => ({ id: `p${i}`, name })),
           realNfc: nfcOk && wantNfc(),
           table: { mode: deal === 'app' ? 'virtual' : 'physical', knowledge: deal === 'scanned' ? 'scanned' : 'counts', deck: [...deck], handSize: plan.handSize, ...(playOn && n >= 3 ? { playOn: true } : {}) },
         });
       } }, 'Start')),
-      h('button', { class: 'link', onclick: onBack }, 'Back'),
+      h('button', { class: 'link', onclick: () => { stopCapture(); onBack(); } }, 'Back'),
     );
     updateDeckViews();
+    paintCapture();
   }
   render();
 }

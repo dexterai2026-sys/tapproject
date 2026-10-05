@@ -13,6 +13,7 @@ A deck of NFC playing cards plus a companion web app. Built from the *AI Smart C
 | OpenRouter commentary + Lazybird voice (step 5) | Built to the documented APIs; **not run against the live services** |
 | Voice input: wake word + push-to-talk | Built with backoff, tolerant wake word, interrupt; tested with a fake recognizer, **not on a real mic** |
 | Voice latency tracing (Timing panel) | Built: per-stage timings, every spoken line traced separately, output latency read from the browser's audio clock. Verified against injected delays (reads back 100/400/300/50ms as 102/400/317/54). **Real numbers need one round on a phone** |
+| Setup option: tap the cards you're using to set the deck; mid-game fixes for deck size and restocking | Built and tested with a stubbed reader. **Not yet tried with real tags** |
 | Scoring: specials 20, winning +2 is drawn first; optional play-on mode (last holding cards loses, 3+ players) | Built and tested, including simulated whole games |\n| Mic closes while the app speaks (fixes audio cut-outs); draw pile empty/restock prompts for real cards | Built and tested with a fake recognizer and 10-card simulated games. **Not yet confirmed on a real phone** |
 | Setup remembers your choices: player count, "Use real NFC taps" (defaults on when the phone supports it and tags are registered), dealing, deck | Built and tested, with a "N of M cards have tags" hint. |
 | Real-card table model: count-only and scan-hands dealing, any number of cards in play | Built and tested: counts match real hands through whole simulated games (3,000+ moves, many deck sizes). **Not yet tried with real NFC cards** |
@@ -155,6 +156,9 @@ Likely fixes, picked once the numbers show the biggest stage: act on interim res
 ## Running log
 
 Newest first. Add an entry with every push.
+
+### 2026-10-05 (tap the cards you're using)
+- **Setup:** new option under *Cards in play*, **Tap the cards I'm using** (Chrome on Android with registered tags). Tap each real card once; it flags repeats and unregistered tags, and **Use these cards** makes the deck exactly those cards (remembered for next time). This is the easiest way to play with a small deck so the app's deck always matches the table. The number box and *Choose the exact cards* picker still work. Browser-tested with a stubbed NFC reader; **not yet tried with real tags**.
 
 ### 2026-10-05 (restock catch-up, deck size fix)
 - **Likely cause of "already on the pile" + "18 cards in play":** a real 10-card deck is only the cards you actually hold, but the app picks its own 10 (the lowest numbers) unless you choose them. Tapping a card the app didn't expect offered *Add to the deck*; each add grew the deck (10 -> 18), which put phantom cards in the app's draw pile, so it never noticed the pile was empty and kept the old discards, refusing cards you had shuffled back in.
