@@ -2,7 +2,7 @@ import type { Action, ActionResult, Cartridge, Card, GameState, GameStatus, Play
 import { cardById, mulberry32, shuffle } from '../engine/deck';
 import { ALL_CARD_IDS } from '../engine/deckConfig';
 import { advance, createTurn, currentPlayer, reverse, skip } from '../engine/turns';
-import { deckCards, deckHas, defaultTable, fullyKnown, handCount, inDiscard, knownOwner, knownPoints, outOfDeckMessage, physicalDraw, scanInto, syncCounts, unknownOf } from '../engine/table';
+import { alreadyPlayedMessage, catchUpRestock, deckCards, deckHas, defaultTable, fullyKnown, handCount, inDiscard, knownOwner, knownPoints, outOfDeckMessage, physicalDraw, restock, scanInto, syncCounts, unknownOf } from '../engine/table';
 
 /** Original name (Uno is a Mattel trademark); placeholder until the brief's naming step. */
 export const MATCHING_NAME = 'Match Up';
@@ -172,6 +172,8 @@ const ALLOWED: Record<Action['type'], GameStatus[]> = {
   finishScoring: ['scoring'],
   adjust: ['setup', 'playing'],
   addCard: ['setup', 'scanning', 'playing'],
+  restock: ['scanning', 'playing'],
+  deckSize: ['setup', 'scanning', 'playing'],
 };
 
 function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
@@ -188,6 +190,8 @@ function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
     case 'confirm': return doConfirm(s, action.ok);
     case 'score': return doScore(prev, s, action.cardId);
     case 'finishScoring': return doFinishScoring(s);
+    case 'deckSize': return doDeckSize(prev, s, action.count);
+    case 'restock': return doRestock(prev, s);
     case 'addCard': return doAddCard(prev, s, action.cardId);
     case 'adjust': return doAdjust(prev, s, action.player, action.delta);
     case 'callLast': return doCallLast(prev, s, action.player);
@@ -198,6 +202,33 @@ function reduce(prev: GameState, action: Action, rng: Rng): ActionResult {
 
 // ---- physical table: setup, scanning, confirming, scoring ------------------
 
+/**
+ * Real cards: the deck in the app doesn't match the cards on the table (extra cards were added, or the count was
+ * wrong). Cards the app has seen (in hands or on the pile) always stay; the rest are trimmed or topped up to `count`.
+ */
+function doDeckSize(prev: GameState, s: GameState, count: number): ActionResult {
+  if (!isPhysical(s)) return fail(prev, 'The app deals from the cards in play, so this only applies to real cards.');
+  if (!Number.isInteger(count) || count < 1 || count > ALL_CARD_IDS.length) return fail(prev, `Enter a whole number from 1 to ${ALL_CARD_IDS.length}.`);
+  const seen = new Set<string>(s.public.discard.map((c) => c.id));
+  for (const p of s.players) for (const c of s.private[p.id]?.hand ?? []) seen.add(c.id);
+  const unseenInHands = s.players.reduce((n, p) => n + unknownOf(s.private[p.id]), 0);
+  const needed = seen.size + unseenInHands;
+  if (count < needed) return fail(prev, `At least ${needed} cards are already in hands or on the pile, so the deck can't be smaller than that.`);
+  const rest = ALL_CARD_IDS.filter((id) => !seen.has(id));
+  const room = count - seen.size;
+  const keep = new Set([...new Set([...s.table.deck.filter((id) => !seen.has(id)), ...rest])].slice(0, room)); // keep what was in play first, then top up
+  s.table.deck = ALL_CARD_IDS.filter((id) => seen.has(id) || keep.has(id));
+  syncCounts(s);
+  logLine(s, `Cards in play corrected to ${s.table.deck.length}.`);
+  return { ok: true, state: s, message: `Now ${s.table.deck.length} cards in play. Draw pile: ${s.public.drawPileCount}.` };
+}
+
+function doRestock(prev: GameState, s: GameState): ActionResult {
+  if (!isPhysical(s)) return fail(prev, 'The app restocks the draw pile by itself.');
+  if (!restock(s)) return fail(prev, 'There is nothing in the discard pile to shuffle back in.');
+  return { ok: true, state: s, message: `Draw pile restocked: ${s.public.drawPileCount} cards.` };
+}
+
 function doAddCard(prev: GameState, s: GameState, cardId: string): ActionResult {
   const card = cardById(cardId);
   if (!card) return fail(prev, `${cardId} isn't a card in this game.`);
@@ -205,7 +236,7 @@ function doAddCard(prev: GameState, s: GameState, cardId: string): ActionResult 
   s.table.deck = ALL_CARD_IDS.filter((id) => id === cardId || s.table.deck.includes(id));
   syncCounts(s);
   logLine(s, `${card.id} added to the deck (${s.table.deck.length} cards in play).`);
-  return { ok: true, state: s, message: `${card.id} added to the deck.` };
+  return { ok: true, state: s, message: `${card.id} added: now ${s.table.deck.length} cards in play. If that is not how many you really have, fix it under "Fix a card count or the deck size".` };
 }
 
 function doFlip(prev: GameState, s: GameState, cardId: string): ActionResult {
@@ -412,7 +443,8 @@ function doPlay(prev: GameState, s: GameState, player: PlayerId, cardId: string,
 
   const known = hp.hand.find((c) => c.id === cardId);
   if (!known) {
-    if (inDiscard(s, cardId)) return fail(prev, `${cardId} is already on the pile.`);
+    catchUpRestock(s, cardId); // played before, shuffled back in by the table, now in play again
+    if (inDiscard(s, cardId)) return fail(prev, alreadyPlayedMessage(s, cardId));
     const owner = knownOwner(s, cardId);
     if (owner) return fail(prev, `That's ${name(s, owner)}'s card, not ${who}'s.`);
     // Not identified: fine if this player still holds cards the app hasn't identified (it learns this one now).

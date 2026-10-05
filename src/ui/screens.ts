@@ -146,6 +146,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
   const settings = loadSettings();
   let flash = resume ? 'Game resumed.' : '';
   let flashOk = true;
+  let offerRestock = false; // a replayed card usually means the table shuffled the discards back in
   let leftOut: string | null = null; // a tapped card this game was set up without: offer to add it back
   const fx = createFeedback({ sound: settings.sound, style: game.feedbackStyle });
   const nameOf = (id: string) => players.find((p) => p.id === id)?.name ?? id;
@@ -228,6 +229,7 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
     flashOk = r.ok;
     const tapped = 'cardId' in a ? a.cardId : null;
     leftOut = !r.ok && tapped && cardById(tapped) && !state.table.deck.includes(tapped) ? tapped : null;
+    offerRestock = !r.ok && /already on the pile/.test(r.message) && state.table.mode === 'physical' && state.public.discard.length > 1;
     fx(r.ok ? 'success' : 'error');
     if (r.ok) {
       if (simTable) {
@@ -475,8 +477,12 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
       pub.status === 'playing' && h('button', { onclick: () => act({ type: 'callLast', player: pub.lastCardPending ?? cur }) }, 'Call last card (L)'),
       history.length > 0 && h('button', { id: 'undo', onclick: () => undo() }, 'Undo last move'),
       physical && h('details', { class: 'corrections', open: correctionsOpen, ontoggle: (e: Event) => (correctionsOpen = (e.target as HTMLDetailsElement).open) },
-        h('summary', {}, 'Fix a card count'),
+        h('summary', {}, 'Fix a card count or the deck size'),
         h('small', {}, 'Forgot to say "draw", or miscounted? Correct it here.'),
+        h('label', {}, `Cards really in play (app has ${state.table.deck.length}) `,
+          h('input', { id: 'decksize', type: 'number', min: 1, max: 52, value: state.table.deck.length, style: 'width:5rem',
+            onchange: (e: Event) => { const v = Math.round(Number((e.target as HTMLInputElement).value)); if (Number.isFinite(v)) act({ type: 'deckSize', count: v }); } })),
+        pub.status === 'playing' && pub.discard.length > 1 && h('button', { id: 'restock-now', onclick: () => act({ type: 'restock' }) }, 'I shuffled the discards into a new draw pile'),
         h('ul', {}, players.map((p) =>
           h('li', {}, `${p.name}: ${handCount(state, p.id)} `,
             h('button', { 'aria-label': `One fewer card for ${p.name}`, onclick: () => act({ type: 'adjust', player: p.id, delta: -1 }) }, '−'),
@@ -507,10 +513,12 @@ function gameScreen(game: Cartridge, start: GameStartOptions): void {
         h('h2', {}, heading, pub.status === 'playing' && pub.pendingDraw ? ` — play a +2 or draw ${pub.pendingDraw}` : ''),
         pub.lastCardPending && h('p', { class: 'warn' }, `${nameOf(pub.lastCardPending)} is on one card — call it (L)!`),
         h('p', { class: flashOk ? 'ok' : 'err', role: 'status' }, flash || ' '),
+        offerRestock && h('button', { id: 'restock-offer', onclick: () => act({ type: 'restock' }) }, 'I shuffled the discards into a new draw pile'),
         leftOut && h('button', { id: 'add-card', onclick: () => { const id = leftOut as string; act({ type: 'addCard', cardId: id }); } }, `Add ${leftOut} to the deck`),
         h('ul', { class: 'scores' }, players.map((p) => { const place = (pub.placings ?? []).indexOf(p.id) + 1; return h('li', {}, `${p.name}: ${place ? `out (${['1st', '2nd', '3rd'][place - 1] ?? `${place}th`})` : `${pub.handCounts[p.id]} cards`} · ${pub.scores[p.id]} pts${pub.loser === p.id ? ' · last holding cards' : ''}`); })),
         h('small', {}, `Draw pile: ${pub.drawPileCount}${physical ? ' (counted from your taps)' : ''}${pub.reshuffles ? ` · restocked ${pub.reshuffles}×` : ''}`),
-        restockDue(state) && h('p', { id: 'restock', class: 'warn', role: 'status' }, RESTOCK_TEXT),
+        restockDue(state) && h('p', { id: 'restock-note', class: 'warn', role: 'status' }, RESTOCK_TEXT,
+          h('button', { id: 'restock', onclick: () => act({ type: 'restock' }) }, 'Done: I restocked it')),
         pub.status === 'finished' && tallyList(),
         caption && h('p', { class: 'caption', 'aria-live': 'polite' }, `🎙 ${caption}`),
         notice && h('small', { class: 'warn' }, notice),

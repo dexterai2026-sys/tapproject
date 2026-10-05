@@ -90,11 +90,37 @@ export function physicalDraw(s: GameState, player: PlayerId, n: number): DrawRes
   return { drawn, reshuffled, note };
 }
 
+export const alreadyPlayedMessage = (s: GameState, id: string): string =>
+  `${id} is already on the pile.${s.table.mode === 'physical' && s.public.discard.length > 1 ? ' If you shuffled the discards back in, tap "I shuffled the discards".' : ''}`;
+
+/** Real cards: the discard pile (minus its top card) has been shuffled back in as the draw pile. Returns false if there was nothing to shuffle. */
+export function restock(s: GameState): boolean {
+  if (s.public.discard.length <= 1) return false;
+  s.public.discard = [s.public.discard[s.public.discard.length - 1] as Card];
+  s.public.reshuffles = (s.public.reshuffles ?? 0) + 1;
+  syncCounts(s);
+  s.public.log.push(`Draw pile restocked from the discards (restock #${s.public.reshuffles}).`);
+  return true;
+}
+
+/**
+ * A card that was played earlier turns up again (played or drawn) while the app thinks the draw pile is empty. That can
+ * only mean the table already shuffled the discards back in without telling the app: catch up instead of refusing.
+ * (With cards still in the pile it is more likely a double tap, so the card is refused with a hint to restock by hand.)
+ */
+export function catchUpRestock(s: GameState, cardId: string): boolean {
+  if (s.table.mode !== 'physical' || !inDiscard(s, cardId) || s.public.drawPileCount > 0) return false;
+  const top = s.public.discard[s.public.discard.length - 1];
+  if (top?.id === cardId) return false; // the card on top really is still on the pile
+  return restock(s);
+}
+
 /** Identify a card in a player's hand (turn one of their unidentified cards into a known one). Returns an error or null. */
 export function scanInto(s: GameState, player: PlayerId, cardId: string, nameOf: (id: PlayerId) => string): string | null {
   const card = cardById(cardId);
   if (!card || !deckHas(s, cardId)) return outOfDeckMessage(s, cardId);
-  if (inDiscard(s, cardId)) return `${card.id} is already on the pile.`;
+  catchUpRestock(s, cardId);
+  if (inDiscard(s, cardId)) return alreadyPlayedMessage(s, card.id);
   const owner = knownOwner(s, cardId);
   if (owner) return owner === player ? `${card.id} is already scanned.` : `${card.id} is in ${nameOf(owner)}'s hand.`;
   const p = s.private[player] as PrivateState;

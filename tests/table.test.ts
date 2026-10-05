@@ -614,3 +614,78 @@ describe('physical table: winning +2 and play-on mode', () => {
     expect(handCount(s, 'p0')).toBe(1);
   });
 });
+
+describe('the table restocks before telling the app', () => {
+  const rigged = (knowledge: 'counts' | 'scanned') => {
+    const deck = deckForCount(10);
+    let s = startGame(matchingGame, mk(2), rng(), table(deck, knowledge, 'physical', 4));
+    s = act(s, { type: 'flip', cardId: deck[2]! }).state;
+    s.public.discard = [card('circle-1'), card('circle-2'), card('triangle-1'), card(deck[2]!)]; // three were played earlier
+    s.private.p0!.unknown = 3; s.private.p1!.unknown = 4; // and one more card each left the hands
+    s.public.drawPileCount = 0; syncCounts(s);
+    return s;
+  };
+  it('with the pile empty, playing a card that was already on the pile means the discards were shuffled back in: catch up, do not refuse', () => {
+    const s = rigged('counts');
+    expect(s.public.drawPileCount).toBe(0);
+    const top = s.public.discard.at(-1)!;
+    const r = act(s, { type: 'play', player: currentPlayer(s.public.turn), cardId: 'circle-1' });
+    expect(r.state.public.reshuffles).toBe(1);
+    expect(r.state.public.discard.length).toBe(r.ok ? 2 : 1);
+    expect(r.state.public.discard[0]!.id).toBe(r.ok ? top.id : top.id);
+  });
+  it('with cards still in the pile it is refused, with a hint and a way to restock by hand', () => {
+    const s = rigged('counts');
+    s.private.p0!.unknown = 1; syncCounts(s); // the app now thinks the pile has cards
+    expect(s.public.drawPileCount).toBeGreaterThan(0);
+    const r = act(s, { type: 'play', player: currentPlayer(s.public.turn), cardId: 'circle-1' });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/shuffled the discards/);
+    expect(r.state.public.reshuffles ?? 0).toBe(0);
+  });
+  it('scanning a drawn card that is in the old discards catches up too', () => {
+    let s = rigged('scanned');
+    s.public.status = 'scanning'; s.public.scanning = { player: 'p0', remaining: 1 };
+    expect(s.public.drawPileCount).toBe(0);
+    s = act(s, { type: 'scan', player: 'p0', cardId: 'circle-1' }).state;
+    expect(s.public.reshuffles).toBe(1);
+    expect(s.private.p0!.hand.map((c) => c.id)).toContain('circle-1');
+    expect(s.public.discard).toHaveLength(1);
+    invariant(s);
+  });
+  it('the top card itself is still refused, and a manual restock works once there is something to shuffle', () => {
+    const s = rigged('counts');
+    const refused = act(s, { type: 'play', player: currentPlayer(s.public.turn), cardId: s.public.discard.at(-1)!.id });
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toMatch(/already on the pile/);
+    const r = act(s, { type: 'restock' });
+    expect(r.ok).toBe(true);
+    expect(r.state.public.discard).toHaveLength(1);
+    expect(r.state.public.reshuffles).toBe(1);
+    expect(act(r.state, { type: 'restock' }).ok).toBe(false); // nothing left to shuffle
+    invariant(r.state);
+  });
+});
+
+describe('correcting the deck size mid-game (real cards)', () => {
+  it('trims extra cards that were added by mistake, never the ones the app has seen', () => {
+    const deck = deckForCount(10);
+    let s = act(startGame(matchingGame, mk(2), rng(), table(deck, 'counts', 'physical', 4)), { type: 'flip', cardId: deck[2]! }).state;
+    for (const id of ['star-13', 'star-12', 'star-11', 'square-13']) s = act(s, { type: 'addCard', cardId: id }).state;
+    expect(s.table.deck).toHaveLength(14);
+    const r = act(s, { type: 'deckSize', count: 10 });
+    expect(r.ok).toBe(true);
+    expect(r.state.table.deck).toHaveLength(10);
+    expect(r.state.table.deck).toContain(deck[2]!); // the flipped card stays
+    expect(pile(r.state)).toBe(1);
+    invariant(r.state);
+  });
+  it('refuses a deck smaller than what is already in hands and on the pile, or nonsense', () => {
+    const deck = deckForCount(10);
+    const s = act(startGame(matchingGame, mk(2), rng(), table(deck, 'counts', 'physical', 4)), { type: 'flip', cardId: deck[2]! }).state;
+    expect(act(s, { type: 'deckSize', count: 5 }).ok).toBe(false);
+    expect(act(s, { type: 'deckSize', count: 0 }).ok).toBe(false);
+    expect(act(s, { type: 'deckSize', count: 99 }).ok).toBe(false);
+    expect(act(s, { type: 'deckSize', count: 12 }).state.table.deck).toHaveLength(12); // topping up is allowed
+  });
+});

@@ -107,6 +107,8 @@ export type Action =
   | { type: 'score'; cardId: string } // a leftover card, counted toward the winner's score
   | { type: 'finishScoring' }
   | { type: 'adjust'; player: PlayerId; delta: number } // correct a player's card count
+  | { type: 'deckSize'; count: number } // real cards: correct how many cards are really in play
+  | { type: 'restock' } // real cards: the table shuffled the discard pile (keeping the top card) into a new draw pile
   | { type: 'addCard'; cardId: string }; // put a card that was left out back into this game's deck
 
 export type ActionResult =
